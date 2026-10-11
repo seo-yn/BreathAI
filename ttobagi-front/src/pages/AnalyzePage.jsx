@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { ScatterChart, Scatter, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer } from "recharts";
 import { dashApi } from "../api/dashboard.js";
 import { faqApi } from "../api/faq.js";
@@ -73,6 +73,23 @@ export default function AnalyzePage() {
   const toast = useToast();
   const { user } = useAuth();
 
+  // SSE 연결과 폴링 타이머를 화면을 떠날 때 반드시 정리한다.
+  // 정리하지 않으면 다른 메뉴로 이동한 뒤에도 스트림과 setInterval이 계속 살아남는다.
+  const streamRef = useRef(null);
+  const pollRef = useRef(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => {
+    streamRef.current?.close();
+    stopPolling();
+  }, [stopPolling]);
+
   // 반영(/faq/apply)은 백엔드가 @PreAuthorize("hasRole('ADMIN')")로 막는다
   const isAdmin = user?.role === "ADMIN";
 
@@ -114,6 +131,9 @@ export default function AnalyzePage() {
 
   const doUpload = async () => {
     if (!file) return;
+    // 이전 분석의 구독이 남아 있으면 단계 표시가 섞이므로 먼저 정리한다
+    streamRef.current?.close();
+    stopPolling();
     setUploading(true);
     setRunning(true);
     setDone(false);
@@ -137,6 +157,7 @@ export default function AnalyzePage() {
       setAnalysisId(analysisId);
 
       const loadResults = () => {
+        stopPolling();
         setStep(4);
         setDone(true);
         setRunning(false);
@@ -148,42 +169,47 @@ export default function AnalyzePage() {
         }).catch((err) => toast.error(err.message || "분석 결과를 불러오지 못했습니다."));
       };
 
-      dashApi.streamAnalysisStatus(
+      // 백엔드 AnalysisJob.Status는 PENDING / PREPROCESSING / ANALYZING / COMPLETED / FAIL이고,
+      // 구독 즉시 현재 상태를 한 번 보내준다. 화면 단계는 5개인데 상태는 3개뿐이라 대표 지점만 찍는다.
+      const applyStatus = (status) => {
+        if (status === "PENDING")       setStep(-1);
+        if (status === "PREPROCESSING") setStep(0);
+        if (status === "ANALYZING")     setStep(2);
+        if (status === "COMPLETED")     loadResults();
+        if (status === "FAIL") {
+          setRunning(false);
+          toast.error("분석에 실패했습니다.");
+        }
+        return status === "COMPLETED" || status === "FAIL";
+      };
+
+      // SSE가 끊기면 폴링으로 이어받는다. 중복 시작을 막아야 interval이 여러 개 돌지 않는다.
+      const startPolling = () => {
+        if (pollRef.current) return;
+        pollRef.current = setInterval(async () => {
+          try {
+            const statusRes = await dashApi.getAnalysisStatus(analysisId);
+            if (applyStatus(statusRes.data?.status)) stopPolling();
+          } catch (err) {
+            stopPolling();
+            setRunning(false);
+            toast.error(err.message || "분석 상태 조회에 실패했습니다.");
+          }
+        }, 3000);
+      };
+
+      streamRef.current = dashApi.streamAnalysisStatus(
         analysisId,
         (data) => {
-          const parsed = JSON.parse(data);
-          const status = parsed.status;
-          if (status === "PREPROCESSING") setStep(0);
-          if (status === "ANALYZING")     setStep(2);
-          if (status === "COMPLETED")     loadResults();
-          if (status === "FAIL") {
-            setRunning(false);
-            toast.error("분석에 실패했습니다.");
+          try {
+            applyStatus(JSON.parse(data).status);
+          } catch {
+            // 상태 JSON이 깨졌으면 스트림을 신뢰할 수 없으니 폴링으로 전환
+            startPolling();
           }
         },
-        () => {
-          const poll = setInterval(async () => {
-            try {
-              const statusRes = await dashApi.getAnalysisStatus(analysisId);
-              const status = statusRes.data?.status;
-              if (status === "PREPROCESSING") setStep(0);
-              if (status === "ANALYZING")     setStep(2);
-              if (status === "COMPLETED") {
-                clearInterval(poll);
-                loadResults();
-              }
-              if (status === "FAIL") {
-                clearInterval(poll);
-                setRunning(false);
-                toast.error("분석에 실패했습니다.");
-              }
-            } catch (err) {
-              clearInterval(poll);
-              setRunning(false);
-              toast.error(err.message || "분석 상태 조회에 실패했습니다.");
-            }
-          }, 3000);
-        }
+        startPolling, // 연결 실패
+        startPolling  // 종료 상태 없이 스트림이 끊긴 경우 (타임아웃·네트워크 단절)
       );
     } catch (err) {
       setUploading(false);

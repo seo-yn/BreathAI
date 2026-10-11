@@ -51,9 +51,14 @@ export const dashApi = {
   // 방법이 없으므로(항상 익명 → 403), fetch + ReadableStream으로 SSE를 직접 파싱해
   // 실제 Authorization 헤더를 싣는다. 백엔드는 SseEmitter.event().name("status")로
   // 이름 있는 이벤트만 보낸다.
-  streamAnalysisStatus: (analysisId, onMessage, onError) => {
+  // onEnd: 종료 상태(COMPLETED/FAIL)를 받지 못한 채 스트림이 끊겼을 때 호출된다.
+  // 백엔드 SseEmitterManager는 COMPLETED/FAIL에서 emitter.complete()로 연결을 닫지만,
+  // 1시간 타임아웃이나 네트워크 단절로도 똑같이 "정상 종료"로 보인다. 그 경우 예외가
+  // 발생하지 않아 onError도 안 타므로, 호출부가 폴링으로 넘어갈 수 있게 따로 알린다.
+  streamAnalysisStatus: (analysisId, onMessage, onError, onEnd) => {
     const { accessToken } = getStoredTokens();
     const controller = new AbortController();
+    let closedByServer = false; // 종료 상태를 받았는지
 
     (async () => {
       try {
@@ -83,9 +88,21 @@ export const dashApi = {
               if (line.startsWith("event:")) eventName = line.slice(6).trim();
               else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
             }
-            if (eventName === "status" && dataLines.length) onMessage(dataLines.join("\n"));
+            if (eventName === "status" && dataLines.length) {
+              const raw = dataLines.join("\n");
+              // 종료 상태를 미리 가려내 스트림이 끊겼을 때의 처리를 구분한다
+              try {
+                const status = JSON.parse(raw).status;
+                if (status === "COMPLETED" || status === "FAIL") closedByServer = true;
+              } catch {
+                /* 파싱 실패는 onMessage에서 처리 */
+              }
+              onMessage(raw);
+            }
           }
         }
+        // 종료 상태 없이 스트림이 끝났으면 폴링으로 이어받아야 한다
+        if (!closedByServer) onEnd?.();
       } catch (err) {
         if (err.name !== "AbortError") onError?.();
       }
