@@ -31,12 +31,16 @@ public class FaqCandidateListResponse {
         private Integer clusterLabel;
         private Long candidateId;
         private CandidateType candidateType;
+        private Integer qType;
+        private String category;
         private String standardQuestion;
+        private List<String> similarQuestions;
         private String answerDraft;
         private ReviewStatus reviewStatus;
         private List<String> representativeKeywords;
         private Integer occurrenceCount;
         private List<SynonymItem> synonyms;
+        private List<MatchedFaqItem> matchedFaqs;
 
         @JsonFormat(
             shape = JsonFormat.Shape.STRING,
@@ -44,6 +48,19 @@ public class FaqCandidateListResponse {
             timezone = "UTC"
         )
         private LocalDateTime createdAt;
+
+        @Getter
+        @Builder
+        @NoArgsConstructor
+        @AllArgsConstructor
+        // 유사 FAQ 단건
+        // 해당 FAQ가 운영 FAQ에 없으면 matchedFaqId와 question은 null
+        public static class MatchedFaqItem {
+            private Long matchedFaqId;
+            private Integer matchedFaqSeqNum;
+            private String question;
+            private double matchScore;
+        }
 
         @Getter
         @Builder

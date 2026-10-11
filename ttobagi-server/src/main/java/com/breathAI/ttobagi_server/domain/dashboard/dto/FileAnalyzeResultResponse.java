@@ -23,7 +23,7 @@ public class FileAnalyzeResultResponse {
     private AnalyzeResultResponse.PerformanceMetrics performanceMetrics;
     private List<AnalyzeResultResponse.TrendItem> trend;
     private List<AnalyzeResultResponse.BurstKeyword> burstKeywords;
-    private AnalyzeResultResponse.UnansweredAnalysis unansweredAnalysis;
+    private AnalyzeResultResponse.UnansweredAnalysis unanswerAnalysis;
     private AnalyzeResultResponse.ClusteringView clusteringView;
     private List<AnalyzeResultResponse.FaqCandidate> faqCandidates;
     private AnalyzeResultResponse.Evaluation evaluation;

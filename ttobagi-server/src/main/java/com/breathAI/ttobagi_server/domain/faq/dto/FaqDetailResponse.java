@@ -12,12 +12,16 @@ import java.util.List;
 // FAQ 단건 상세 조회 응답
 public class FaqDetailResponse {
     private Long faqId;
-    private String question;
+    private Integer qType;
+    private String category;
+    private String standardQuestion;
     private String answer;
     private List<String> keywords;
-    private Integer qType;
     private Integer qaCnt;
 
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
     private LocalDate createdAt;
+
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
+    private LocalDate updatedAt;
 }

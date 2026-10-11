@@ -33,9 +33,9 @@ public class SwaggerConfig {
     @Bean
     public OpenAPI openAPI() {
         Info info = new Info()
-                .title("또바기(Ttobagi) API Documentation")
+                .title("또타24 현행화 시스템 API Documentation")
                 .version("1.0.0")
-                .description("'또바기'의 백엔드 API 명세서입니다.")
+                .description("'또타24 현행화 시스템'의 백엔드 API 명세서입니다.")
                 .contact(new Contact()
                         .name(contactName)
                         .email(contactEmail));

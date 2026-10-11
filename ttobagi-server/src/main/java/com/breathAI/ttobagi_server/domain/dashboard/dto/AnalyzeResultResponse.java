@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.domain.dashboard.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -19,7 +20,7 @@ public class AnalyzeResultResponse {
     private PerformanceMetrics performanceMetrics;
     private List<TrendItem> trend;
     private List<BurstKeyword> burstKeywords;
-    private UnansweredAnalysis unansweredAnalysis;
+    private UnansweredAnalysis unanswerAnalysis;
     private ClusteringView clusteringView;
     private List<FaqCandidate> faqCandidates;
     private Evaluation evaluation;
@@ -36,14 +37,14 @@ public class AnalyzeResultResponse {
         public static class SamplingStatus {
             private int correct;
             private int lowQuality;
-            private int unanswered;
+            private int unanswer;
         }
     }
 
     @Getter
     @Builder
     public static class PerformanceMetrics {
-        private double currentUnansweredRate;
+        private double currentUnanswerRate;
         private double predictedAccuracyGain;
         private int resolvedCountByAI;
     }
@@ -52,7 +53,7 @@ public class AnalyzeResultResponse {
     @Builder
     public static class TrendItem {
         private String date;
-        private int unansweredCount;
+        private int unanswerCount;
         private int lowQualityCount;
     }
 
@@ -97,6 +98,7 @@ public class AnalyzeResultResponse {
         @Getter
         @Builder
         public static class ClusterName {
+            private Long clusterId;
             private int clusterLabel;
             private String name;
             private List<String> topKeywords;
@@ -110,7 +112,10 @@ public class AnalyzeResultResponse {
         private Long candidateId;
         private int clusterLabel;
         private String candidateType;
+        private Integer qType;
+        private String category;
         private String standardQuestion;
+        private List<String> similarQuestions;
         private List<String> representativeKeywords;
         private String answerDraft;
         private List<SynonymItem> synonyms;
@@ -148,7 +153,9 @@ public class AnalyzeResultResponse {
     @Builder
     public static class SurgeDetection {
         private String keyword;
-        private boolean isNew;
+        // boolean이면 응답에 new로 나가므로 Boolean으로 둔다
+        @JsonProperty("isNew")
+        private Boolean isNew;
         private int relatedClusterLabel;
         private List<PeriodStat> periodStats;
 

@@ -12,7 +12,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import com.breathAI.ttobagi_server.global.util.SseEmitterManager;
 
 
 import java.util.List;
@@ -25,7 +24,6 @@ import java.time.LocalDate;
 public class DashboardController {
 
     private final DashboardService dashboardService;
-    private final SseEmitterManager sseEmitterManager;
 
     // 월 단위 챗봇 사용량 조회
     @GetMapping("/usage")
@@ -39,11 +37,11 @@ public class DashboardController {
     }
 
     // 기간 기반 분석 결과 조회, 기간 미지정 시 최신 분석 반환
-    @GetMapping("/analyze/results")
+    @GetMapping("/analyze/result")
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
     public ResponseEntity<ApiResponse<AnalyzeResultResponse>> getAnalyzeResult(
-            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyyMMdd") LocalDate startDate,
-            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyyMMdd") LocalDate endDate) {
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         return ResponseEntity.ok(ApiResponse.success(
                 dashboardService.getAnalyzeResult(startDate, endDate),
                 "대시보드 분석 데이터 조회가 완료되었습니다."));
@@ -57,7 +55,7 @@ public class DashboardController {
         
         return ResponseEntity.ok(ApiResponse.success(
             dashboardService.getFileAnalyzeResult(analysisId),
-            "업로드 파일별 분석 결과 조회가 완료되었습니다."));
+            "대시보드 분석 데이터 조회가 완료되었습니다."));
     }
 
     // 파일 업로드 및 분석 시작, 관리자 전용
@@ -72,7 +70,7 @@ public class DashboardController {
             @AuthenticationPrincipal String email) {
         return ResponseEntity.ok(ApiResponse.success(
                 dashboardService.uploadAndStartAnalysis(file, email, periodStartDate, periodEndDate, isMaskingEnabled, isTranslationEnabled),
-                "파일 업로드 및 AI 분석 파이프라인을 시작합니다."));
+                "분석 파이프라인이 성공적으로 시작되었습니다."));
     }
 
     // 분석 진행 상태 조회, SSE 끊김 시 폴링 용도
@@ -82,7 +80,7 @@ public class DashboardController {
             @PathVariable Long analysisId) {
         return ResponseEntity.ok(ApiResponse.success(
                 dashboardService.getAnalysisStatus(analysisId),
-                "현재 분석 상태 진행을 조회합니다."));
+                "현재 분석 진행 상태를 조회합니다."));
     }
 
     // 분석 이력 목록 조회
@@ -106,10 +104,10 @@ public class DashboardController {
         return ResponseEntity.ok(ApiResponse.success(null));
     }
 
-    // 분석 진행 상태 실시간 스트리밍(SSE)
+    // 분석 진행 상태 실시간 스트리밍(SSE), 연결 즉시 현재 상태를 한 번 전송
     @GetMapping(value = "/analyze/stream/{analysisId}", produces = "text/event-stream")
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
     public SseEmitter streamAnalysisStatus(@PathVariable Long analysisId) {
-        return sseEmitterManager.create(analysisId);
+        return dashboardService.subscribeAnalysisStatus(analysisId);
     }
 }

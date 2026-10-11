@@ -13,6 +13,7 @@ import com.breathAI.ttobagi_server.domain.faq.repository.FaqActionLogRepository;
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqCandidateRepository;
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqEditHistoryRepository;
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqRepository;
+import com.breathAI.ttobagi_server.domain.faq.repository.FaqVersionRepository;
 import com.breathAI.ttobagi_server.domain.faq.repository.RetrieveLogRepository;
 import com.breathAI.ttobagi_server.global.exception.CustomException;
 import com.breathAI.ttobagi_server.global.exception.ErrorCode;
@@ -25,9 +26,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.UUID;
 
 // 회원가입, 로그인, 토큰 재발급, 비밀번호 재설정 등 계정 관련 처리
 @Service
@@ -47,7 +50,14 @@ public class AuthService {
     private final FaqCandidateRepository faqCandidateRepository;
     private final FaqEditHistoryRepository faqEditHistoryRepository;
     private final FaqRepository faqRepository;
+    private final FaqVersionRepository faqVersionRepository;
     private final RetrieveLogRepository retrieveLogRepository;
+
+    // 비밀번호 재설정 인증 코드 규칙 (영문 대소문자 + 숫자, 서로 헷갈리는 0 O 1 l I 는 뺀다)
+    private static final String RESET_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    private static final int RESET_CODE_LENGTH = 6;
+    private static final int MAX_RESET_ATTEMPTS = 5;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     // 관리자 승격용 인증 코드 (환경변수 SYSTEM_ADMIN_CODE)
     @Value("${system.admin-code}")
@@ -106,17 +116,17 @@ public class AuthService {
             .build();
     }
 
-    // 비밀번호 재설정 요청, 토큰 생성 후 메일 발송
+    // 비밀번호 재설정 요청, 6자리 인증 코드 생성 후 메일 발송
     @Transactional
     public PasswordResetResponse resetPassword(PasswordResetRequest request) {
         User user = userRepository.findByEmail(request.getEmail())
             .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 
-        // 기존 토큰 삭제
+        // 기존 코드 삭제 (다시 요청하면 이전 코드는 쓸 수 없다)
         passwordResetTokenRepository.deleteByUser(user);
 
-        // 새 토큰 생성
-        String token = UUID.randomUUID().toString();
+        // 새 코드 생성
+        String token = generateResetCode();
         PasswordResetToken resetToken = PasswordResetToken.builder()
                 .token(token)
                 .user(user)
@@ -131,25 +141,55 @@ public class AuthService {
         return new PasswordResetResponse(user.getEmail());
     }
 
-    // 비밀번호 재설정 확정, 토큰 유효성 검증 후 변경
-    @Transactional
+    // 비밀번호 재설정 확정, 인증 코드 검증 후 변경
+    // 코드가 짧으므로 코드만으로 찾지 않고 이메일의 사용자에게 발급된 코드와 비교한다
+    // 실패 횟수 기록과 만료 코드 삭제가 예외와 함께 되돌려지지 않도록 CustomException 에는 롤백하지 않는다
+    @Transactional(noRollbackFor = CustomException.class)
     public void confirmResetPassword(PasswordResetConfirmRequest request) {
-        PasswordResetToken resetToken = passwordResetTokenRepository.findByToken(request.getToken())
-                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_TOKEN));
+        // 가입 여부가 드러나지 않도록 없는 이메일도 코드 불일치와 같은 응답을 준다
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_RESET_CODE));
+        PasswordResetToken resetToken = passwordResetTokenRepository.findByUser(user)
+                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_RESET_CODE));
 
         if (resetToken.isExpired()) {
             passwordResetTokenRepository.delete(resetToken);
-            throw new CustomException(ErrorCode.EXPIRED_TOKEN);
+            throw new CustomException(ErrorCode.EXPIRED_RESET_CODE);
         }
-        
-        if (resetToken.isUsed()) { 
+
+        if (resetToken.isUsed()) {
             throw new CustomException(ErrorCode.ALREADY_USED_TOKEN);
         }
 
-        User user = resetToken.getUser();
+        if (resetToken.isLocked(MAX_RESET_ATTEMPTS)) {
+            throw new CustomException(ErrorCode.RESET_CODE_ATTEMPTS_EXCEEDED);
+        }
+
+        // DB 는 대소문자를 구분하지 않고 비교하므로 여기서 직접 비교한다
+        boolean matches = MessageDigest.isEqual(
+                resetToken.getToken().getBytes(StandardCharsets.UTF_8),
+                request.getToken().getBytes(StandardCharsets.UTF_8));
+        if (!matches) {
+            resetToken.recordFailedAttempt();
+            throw new CustomException(ErrorCode.INVALID_RESET_CODE);
+        }
+
         user.updatePassword(passwordEncoder.encode(request.getNewPassword()));
 
-        resetToken.useToken(); 
+        resetToken.useToken();
+    }
+
+    // 영문 대소문자와 숫자로 된 6자리 인증 코드, 이미 발급된 코드와 겹치면 다시 뽑는다
+    private String generateResetCode() {
+        String code;
+        do {
+            StringBuilder sb = new StringBuilder(RESET_CODE_LENGTH);
+            for (int i = 0; i < RESET_CODE_LENGTH; i++) {
+                sb.append(RESET_CODE_CHARS.charAt(SECURE_RANDOM.nextInt(RESET_CODE_CHARS.length())));
+            }
+            code = sb.toString();
+        } while (passwordResetTokenRepository.existsByToken(code));
+        return code;
     }
 
     // 관리자 권한 승격, 관리자 코드 검증 필요
@@ -207,6 +247,7 @@ public class AuthService {
         faqCandidateRepository.clearReviewedBy(user);
         faqEditHistoryRepository.clearEditedBy(user);
         faqRepository.clearCreatedBy(user);
+        faqVersionRepository.clearCreatedBy(user);
         retrieveLogRepository.clearUser(user);
         userRepository.delete(user);
     }

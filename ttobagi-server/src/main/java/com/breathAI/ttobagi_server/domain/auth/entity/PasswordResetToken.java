@@ -23,9 +23,13 @@ public class PasswordResetToken {
     @JoinColumn(name = "user_id", nullable = false, foreignKey = @ForeignKey(name = "fk_token_user_id"))
     private User user;
 
-    // 메일로 발송되는 UUID 문자열
+    // 메일로 발송되는 6자리 인증 코드 (영문 대소문자 + 숫자)
     @Column(name = "token", nullable = false, unique = true)
     private String token;
+
+    // 틀린 코드를 입력한 횟수, 한도에 도달하면 이 코드는 더 쓸 수 없다
+    @Column(name = "attempt_count", nullable = false, columnDefinition = "INT NOT NULL DEFAULT 0 COMMENT '인증 코드 입력 실패 횟수'")
+    private int attemptCount = 0;
 
     @Column(name = "expiry_date", nullable = false)
     private LocalDateTime expiryDate;
@@ -55,6 +59,16 @@ public class PasswordResetToken {
     // 만료 여부 확인
     public boolean isExpired() {
         return LocalDateTime.now().isAfter(this.expiryDate);
+    }
+
+    // 틀린 입력 1회 기록
+    public void recordFailedAttempt() {
+        this.attemptCount++;
+    }
+
+    // 틀린 횟수가 한도에 도달했는지 확인
+    public boolean isLocked(int maxAttempts) {
+        return this.attemptCount >= maxAttempts;
     }
 
 }

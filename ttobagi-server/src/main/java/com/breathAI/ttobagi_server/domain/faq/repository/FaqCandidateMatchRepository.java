@@ -14,6 +14,9 @@ public interface FaqCandidateMatchRepository extends JpaRepository<FaqCandidateM
     // 특정 후보의 모든 매칭 정보
     List<FaqCandidateMatch> findByCandidate(FaqCandidate candidate);
 
+    // 분석 단위 유사 FAQ 매칭 전체 조회, 점수 높은 순
+    List<FaqCandidateMatch> findByCandidate_AnalysisJob_AnalysisIdOrderByMatchScoreDesc(Long analysisId);
+
     // 점수 높은 순 정렬
     List<FaqCandidateMatch> findByCandidateCandidateIdOrderByMatchScoreDesc(Long candidateId);
 

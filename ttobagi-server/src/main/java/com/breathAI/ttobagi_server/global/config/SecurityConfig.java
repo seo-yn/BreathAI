@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -15,6 +16,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.util.List;
@@ -49,6 +51,8 @@ public class SecurityConfig {
                 config.setAllowedOrigins(allowedOrigins);
                 config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
                 config.setAllowedHeaders(List.of("*"));
+                // 다운로드 파일 이름을 프론트엔드가 읽을 수 있게 한다
+                config.setExposedHeaders(List.of(HttpHeaders.CONTENT_DISPOSITION));
                 config.setAllowCredentials(true);
                 return config;
             }))
@@ -63,6 +67,8 @@ public class SecurityConfig {
                 })
             )
             .authorizeHttpRequests(authz -> authz
+                // SSE 응답을 마무리하는 내부 재요청은 최초 요청에서 이미 인증을 거쳤으므로 다시 검사하지 않는다
+                .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/api/v1/dashboard/analyze/callback/**").permitAll()

@@ -12,6 +12,8 @@ public enum ErrorCode {
     // 400 BAD REQUEST: 잘못된 요청
     INVALID_INPUT_VALUE(400, "G-001", "입력값이 올바르지 않습니다."),
     ALREADY_USED_TOKEN(400, "G-002", "이미 사용되었거나 만료된 토큰입니다."),
+    INVALID_RESET_CODE(400, "A-008", "인증 코드가 일치하지 않습니다."),
+    EXPIRED_RESET_CODE(400, "A-009", "인증 코드가 만료되었습니다. 코드를 다시 발급받아 주세요."),
     
     // 401 UNAUTHORIZED: 인증 실패
     INVALID_PASSWORD(401, "A-001", "비밀번호가 일치하지 않습니다."),
@@ -34,9 +36,14 @@ public enum ErrorCode {
     FAQ_NOT_FOUND(404, "F-001", "해당 FAQ를 찾을 수 없습니다."),
     FAQ_CANDIDATE_NOT_FOUND(404, "F-002", "FAQ 후보를 찾을 수 없습니다."),
     FAQ_CANDIDATE_NOT_APPLICABLE(409, "F-003", "반영할 수 없는 상태의 FAQ 후보입니다."),
+    FAQ_EXPAND_TARGET_NOT_FOUND(409, "F-004", "확장할 기존 FAQ를 찾을 수 없습니다."),
+    FAQ_VERSION_NOT_FOUND(404, "F-005", "FAQ 버전을 찾을 수 없습니다."),
 
     // 409 CONFLICT: 중복된 리소스
     EMAIL_DUPLICATED(409, "U-002", "이미 등록된 이메일입니다."),
+
+    // 429 TOO MANY REQUESTS: 시도 횟수 초과
+    RESET_CODE_ATTEMPTS_EXCEEDED(429, "A-010", "인증 코드 입력 횟수를 초과했습니다. 코드를 다시 발급받아 주세요."),
 
     // 500 INTERNAL SERVER ERROR: 서버 에러
     INTERNAL_SERVER_ERROR(500, "S-001", "서버 내부 오류가 발생했습니다."),

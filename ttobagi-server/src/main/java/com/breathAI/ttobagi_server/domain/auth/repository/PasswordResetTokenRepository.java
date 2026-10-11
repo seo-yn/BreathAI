@@ -13,6 +13,9 @@ public interface PasswordResetTokenRepository extends JpaRepository<PasswordRese
     // 사용자가 입력한 토큰 문자열로 조회
     Optional<PasswordResetToken> findByToken(String token);
 
+    // 같은 코드가 이미 발급돼 있는지 확인
+    boolean existsByToken(String token);
+
     // 사용자 기준 토큰 조회
     Optional<PasswordResetToken> findByUser(User user);
 

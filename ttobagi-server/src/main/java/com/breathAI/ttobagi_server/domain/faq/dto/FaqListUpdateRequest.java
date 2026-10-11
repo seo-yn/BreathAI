@@ -11,12 +11,17 @@ import java.util.List;
 // FAQ 수정 요청
 public class FaqListUpdateRequest {
 
+    // 카테고리 코드
+    private Integer qType;
+
     @NotBlank(message = "질문은 필수 입력 값입니다.")
-    private String question;
+    private String standardQuestion;
 
     @NotBlank(message = "답변은 필수 입력 값입니다.")
     private String answer;
 
     private List<String> keywords;
-    
+
+    private String editReason;
+
 }

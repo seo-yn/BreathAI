@@ -14,12 +14,13 @@ public class SseEmitterManager {
     // analysisId 기준 구독 중인 연결 목록
     private final Map<Long, SseEmitter> emitters = new ConcurrentHashMap<>();
 
-    // SSE 연결 생성 및 보관, 타임아웃 30분
+    // SSE 연결 생성 및 보관, 타임아웃 1시간
     public SseEmitter create(Long analysisId) {
-        SseEmitter emitter = new SseEmitter(30 * 60 * 1000L);
+        SseEmitter emitter = new SseEmitter(60 * 60 * 1000L);
         emitters.put(analysisId, emitter);
-        emitter.onCompletion(() -> emitters.remove(analysisId));
-        emitter.onTimeout(() -> emitters.remove(analysisId));
+        // 그 사이 다른 연결로 교체됐을 수 있으므로 자기 자신일 때만 제거한다
+        emitter.onCompletion(() -> emitters.remove(analysisId, emitter));
+        emitter.onTimeout(() -> emitters.remove(analysisId, emitter));
         return emitter;
     }
 
@@ -27,6 +28,11 @@ public class SseEmitterManager {
     public void send(Long analysisId, String status, String message) {
         SseEmitter emitter = emitters.get(analysisId);
         if (emitter == null) return;
+        send(emitter, analysisId, status, message);
+    }
+
+    // 지정한 연결에 상태 전송, 종료 상태면 연결을 닫는다
+    public void send(SseEmitter emitter, Long analysisId, String status, String message) {
         try {
             emitter.send(SseEmitter.event()
                     .name("status")
@@ -35,7 +41,7 @@ public class SseEmitterManager {
                 emitter.complete();
             }
         } catch (Exception e) {
-            emitters.remove(analysisId);
+            emitters.remove(analysisId, emitter);
         }
     }
 }

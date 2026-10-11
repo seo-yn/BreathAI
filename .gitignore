@@ -50,6 +50,9 @@ dataset/tota24_unanswered_2026Q1.csv
 dataset/preprocessed_full.csv
 dataset/kb_embeddings.npy
 dataset/kb_embeddings.meta.json
+dataset/cate_info.csv
+dataset/counselling_info.csv
+dataset/일반상담.xlsx
 
 # Temporary files
 tmp/

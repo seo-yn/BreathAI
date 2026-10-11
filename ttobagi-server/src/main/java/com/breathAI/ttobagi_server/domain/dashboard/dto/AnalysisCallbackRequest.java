@@ -126,6 +126,9 @@ public class AnalysisCallbackRequest {
         private String candidateType;
         private String standardQuestion;
         private String answerDraft;
+        private Integer qType;
+        private String category;
+        private List<String> similarQuestions;
         private Integer occurrenceCount;
         private List<String> representativeKeywords;
         private Integer clusterLabel;

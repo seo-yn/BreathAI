@@ -17,6 +17,8 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import com.breathAI.ttobagi_server.domain.auth.entity.User;
 
 import java.time.LocalDateTime;
@@ -52,10 +54,14 @@ public class Faq {
     @Column(name = "q_type", columnDefinition = "INT COMMENT '카테고리 코드'")
     private Integer qType;
 
+    @Column(name = "category", length = 100, columnDefinition = "VARCHAR(100) COMMENT '일반상담 카테고리'")
+    private String category;
+
     @Column(name = "qa_cnt", nullable = false, columnDefinition = "INT NOT NULL DEFAULT 0 COMMENT '누적 질의 수'")
     @ColumnDefault("0")
     private Integer qaCnt;
 
+    @JdbcTypeCode(SqlTypes.TINYINT)
     @Column(name = "is_active", nullable = false, columnDefinition = "TINYINT NOT NULL DEFAULT 1 COMMENT '활성 여부'")
     @ColumnDefault("1")
     private Boolean isActive;
@@ -87,24 +93,26 @@ public class Faq {
 
     @Builder
     public Faq(Integer sourceSeqNum, FaqCandidate candidate, String question, String answer,
-               String keywords, Integer qType, User createdBy) {
+               String keywords, Integer qType, String category, User createdBy) {
         this.sourceSeqNum = sourceSeqNum;
         this.candidate = candidate;
         this.question = question;
         this.answer = answer;
         this.keywords = keywords;
         this.qType = qType;
+        this.category = category;
         this.createdBy = createdBy;
         this.isActive = true;
         this.qaCnt = 0;
     }
 
-    // 질문, 답변, 키워드 수정
+    // 질문, 답변, 키워드, 카테고리 코드 수정
     // PATCH 요청 특성상 전달되지 않은 필드는 기존 값을 유지한다
-    public void update(String question, String answer, String keywords) {
+    public void update(String question, String answer, String keywords, Integer qType) {
         if (question != null) this.question = question;
         if (answer != null) this.answer = answer;
         if (keywords != null) this.keywords = keywords;
+        if (qType != null) this.qType = qType;
     }
 
     // 비활성 처리 (soft delete)

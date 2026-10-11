@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.domain.faq.dto;
 
+import com.breathAI.ttobagi_server.domain.faq.entity.FaqEditHistory.EditType;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Builder;
 import lombok.Getter;
@@ -13,21 +14,30 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-// FAQ 수정 이력 조회 응답
+// FAQ 변경 이력 조회 응답, 페이징 정보 포함
 public class FaqEditHistoryResponse {
-    private Long faqId;
+    private long totalCount;
     private List<HistoryItem> histories;
+    private int totalPages;
+    private int currentPage;
+    private int size;
 
     @Getter
     @Builder
-    // 수정 이력 단건
+    // 변경 이력 단건
     public static class HistoryItem {
         private Long historyId;
+        private Long faqId;
+        private EditType editType;
         private Long analysisId;
+        // 아직 버전으로 묶이지 않은 변경이면 null
+        private Long versionId;
         private String beforeQuestion;
         private String beforeAnswer;
+        private List<String> beforeKeywords;
         private String afterQuestion;
         private String afterAnswer;
+        private List<String> afterKeywords;
         private String editReason;
         private String editedBy;
 

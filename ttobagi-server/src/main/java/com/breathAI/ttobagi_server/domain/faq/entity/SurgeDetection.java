@@ -7,6 +7,8 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -44,6 +46,7 @@ public class SurgeDetection {
     @Column(name = "keyword", nullable = false, length = 100, columnDefinition = "VARCHAR(100) COMMENT '급증 키워드'")
     private String keyword;
 
+    @JdbcTypeCode(SqlTypes.TINYINT)
     @Column(name = "is_new", nullable = false, columnDefinition = "TINYINT NOT NULL DEFAULT 0 COMMENT '신규 유형 여부'")
     private Boolean isNew;
 

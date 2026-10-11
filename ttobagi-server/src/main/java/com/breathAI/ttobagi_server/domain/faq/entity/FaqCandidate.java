@@ -45,6 +45,16 @@ public class FaqCandidate {
     @Column(name = "answer_draft", columnDefinition = "TEXT COMMENT '생성된 답변 초안'")
     private String answerDraft;
 
+    @Column(name = "q_type", columnDefinition = "INT COMMENT 'counselling_info 카테고리 번호; 미매칭 시 null'")
+    private Integer qType;
+
+    @Column(name = "category", length = 100, columnDefinition = "VARCHAR(100) COMMENT '일반상담 카테고리; 미매칭 시 null'")
+    private String category;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "similar_questions", columnDefinition = "json COMMENT '클러스터 내 실제 사용자 질문'")
+    private List<String> similarQuestions;
+
     @Column(name = "review_status", nullable = false, length = 20, 
             columnDefinition = "VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING, ACCEPTED, REJECTED, APPLIED'")
     @Enumerated(EnumType.STRING)
@@ -86,13 +96,17 @@ public class FaqCandidate {
     @Builder
     public FaqCandidate(AnalysisJob analysisJob, Cluster cluster, 
                         CandidateType candidateType, String standardQuestion,
-                        String answerDraft, Integer occurrenceCount, 
+                        String answerDraft, Integer qType, String category,
+                        List<String> similarQuestions, Integer occurrenceCount,
                         List<String> representativeKeywords) { 
         this.analysisJob = analysisJob;
         this.cluster = cluster;
         this.candidateType = candidateType;
         this.standardQuestion = standardQuestion;
         this.answerDraft = answerDraft;
+        this.qType = qType;
+        this.category = category;
+        this.similarQuestions = similarQuestions;
         this.occurrenceCount = occurrenceCount;
         this.representativeKeywords = representativeKeywords; 
         this.reviewStatus = ReviewStatus.PENDING;

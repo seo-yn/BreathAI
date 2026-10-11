@@ -1,7 +1,9 @@
-"""또타24 KB 검색기 — BGE-M3 dense embedding + BGE-reranker 2-stage.
+"""또타24 기존 FAQ 검색기 — BGE-M3 임베딩 + BGE reranker 2단계 검색.
 
-입력:  dataset/seoulmetro_kb_clean.jsonl (기존 문서 KB, 선택)
-       MariaDB gold_faq                 (활성 운영 FAQ, 매 실행 동기화)
+입력:  일반상담 Excel                     (수제작 기존 FAQ)
+       counselling_info CSV              (수제작 기존 FAQ)
+       dataset/seoulmetro_kb_clean.jsonl  (추가 안내 문서, 선택)
+       MariaDB gold_faq                   (운영 승인 FAQ, 매 실행 동기화)
        dataset/faq_candidates.json       (질의 = standardQuestion)
 출력:  dataset/kb_embeddings.npy         (KB 임베딩 캐시)
        dataset/faq_retrieval.json        (FAQ별 top-k 검색 결과)
@@ -14,7 +16,9 @@
 from __future__ import annotations
 
 import hashlib
+import csv
 import json
+import os
 import time
 import unicodedata
 from pathlib import Path
@@ -36,6 +40,7 @@ KB_JSONL = DATA_DIR / 'seoulmetro_kb_clean.jsonl'
 KB_EMB = DATA_DIR / 'kb_embeddings.npy'
 KB_EMB_META = DATA_DIR / 'kb_embeddings.meta.json'
 FAQ_JSON = DATA_DIR / 'faq_candidates.json'
+CLUSTERS_CSV = DATA_DIR / 'clusters.csv'
 OUTPUT_JSON = DATA_DIR / 'faq_retrieval.json'
 
 # 모델
@@ -46,11 +51,14 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 TOP_K1 = 20    # dense retrieval
 TOP_K2 = 5     # after rerank
 BATCH_SIZE = 32
+FAQ_MATCH_THRESHOLD = float(os.getenv('TTOBAGI_FAQ_MATCH_THRESHOLD', '0.80'))
+SIMILAR_QUESTION_LIMIT = int(os.getenv('TTOBAGI_SIMILAR_QUESTION_LIMIT', '5'))
+FAQ_SOURCE_TYPES = {'general_consultation', 'counselling_info', 'approved_faq'}
 
 
 def load_kb() -> list[dict]:
     """
-    기존 문서 KB와 DB의 활성 운영 FAQ를 병합해 로드한다.
+    일반상담/counselling 기존 FAQ, 선택 문서, DB 승인 FAQ를 모두 로드한다.
 
     운영자가 신규 FAQ를 반영하면 `gold_faq`에 저장되며, 다음 실행부터
     이 함수가 해당 FAQ의 질문·답변·키워드를 검색 KB에 포함한다.
@@ -63,14 +71,15 @@ def load_kb() -> list[dict]:
         )
     print(
         'KB 병합: '
-        f'기존={counts["base"]}, 승인 FAQ={counts["approvedFaq"]}, '
+        f'문서={counts["base"]}, 일반상담={counts["generalConsultation"]}, '
+        f'counselling={counts["counsellingInfo"]}, 승인 FAQ={counts["approvedFaq"]}, '
         f'최종={counts["merged"]}'
     )
     return kb
 
 
 def kb_fingerprint(kb: list[dict]) -> str:
-    """FAQ 추가뿐 아니라 질문·답변·키워드 수정도 감지하는 콘텐츠 해시."""
+    """FAQ 추가·삭제와 질문·답변·키워드 수정을 감지하는 콘텐츠 해시를 만든다."""
     canonical = json.dumps(
         kb,
         ensure_ascii=False,
@@ -86,8 +95,10 @@ def build_or_load_index(
     force_rebuild: bool = False,
 ) -> np.ndarray:
     """
-    KB 임베딩을 .npy로 캐시한다.
-    force_rebuild=True면 캐시를 무시하고 재계산한다.
+    통합 FAQ의 `text`를 BGE-M3 벡터로 변환하고 .npy에 캐시한다.
+
+    KB 내용, 레코드 수 또는 모델명이 바뀌면 캐시를 재생성한다.
+    force_rebuild=True면 변경 여부와 관계없이 다시 계산한다.
     """
 
     fingerprint = kb_fingerprint(kb)
@@ -158,7 +169,10 @@ def search(
     top_k: int = TOP_K1,
 ) -> list[dict]:
     """
-    dense embedding cosine similarity 기반 top-k 검색.
+    BGE-M3 임베딩의 코사인 유사도로 1차 후보를 검색한다.
+
+    질문과 FAQ 벡터가 정규화되어 있으므로 행렬 내적 `kb_emb @ q_emb`가
+    코사인 유사도와 같다. 키워드 매칭 개수를 별도로 세지는 않는다.
     """
 
     q_emb = enc.encode(
@@ -186,7 +200,10 @@ def rerank(
     top_k: int = TOP_K2,
 ) -> list[dict]:
     """
-    CrossEncoder 기반 reranking.
+    1차 후보를 BGE CrossEncoder로 다시 평가해 상위 FAQ를 반환한다.
+
+    입력 쌍은 `(생성된 표준 질문, 기존 FAQ의 질문+답변+키워드 text)`이다.
+    sigmoid가 적용된 rerank_score를 최종 NEW/EXPAND 판정에 사용한다.
     """
 
     if not candidates:
@@ -212,7 +229,9 @@ def rerank(
 
 def load_faq_candidates() -> list[dict]:
     """
-    faq_generator.py가 생성한 FAQ 후보를 로드한다.
+    faq_generator.py가 생성한 FAQ 후보 JSON을 로드한다.
+
+    각 후보의 standardQuestion을 기존 FAQ 검색 질의로 사용한다.
     """
 
     if not FAQ_JSON.exists():
@@ -225,9 +244,31 @@ def load_faq_candidates() -> list[dict]:
     return data.get('faqCandidates', [])
 
 
+def load_similar_questions() -> dict[int, list[str]]:
+    """클러스터별 실제 사용자 질문을 중복 없이 상위 N개 반환한다."""
+    if not CLUSTERS_CSV.exists():
+        return {}
+    grouped: dict[int, list[str]] = {}
+    with CLUSTERS_CSV.open(encoding='utf-8-sig', newline='') as fp:
+        for row in csv.DictReader(fp):
+            cluster_id = int(row['clusterId'])
+            text = str(row.get('text') or '').strip()
+            questions = grouped.setdefault(cluster_id, [])
+            if text and text not in questions and len(questions) < SIMILAR_QUESTION_LIMIT:
+                questions.append(text)
+    return grouped
+
+
 def run_for_faqs() -> None:
     """
-    FAQ 후보의 standardQuestion을 질의로 사용해 KB 검색 결과를 생성한다.
+    FAQ 후보를 기존 FAQ와 비교하고 검색·분류 필드를 보강한다.
+
+    처리 순서:
+    1. 네 원천을 통합한 KB 로드 및 임베딩
+    2. standardQuestion으로 코사인 유사도 상위 20개 검색
+    3. reranker로 상위 5개 재정렬
+    4. FAQ 원천의 최고 점수가 임계값 이상이면 EXPAND, 아니면 NEW
+    5. qType/category/matchedFaqs/similarQuestions를 후보에 기록
     """
 
     kb = load_kb()
@@ -247,6 +288,7 @@ def run_for_faqs() -> None:
     print(f'reranker loaded: {RERANK_MODEL}')
 
     candidates = load_faq_candidates()
+    similar_by_cluster = load_similar_questions()
 
     faqs = [
         c for c in candidates
@@ -290,6 +332,9 @@ def run_for_faqs() -> None:
                     'page_label': t.get('page_label'),
                     'chunk_id': t.get('chunk_id'),
                     'faq_id': t.get('faq_id'),
+                    'source_seq_num': t.get('source_seq_num'),
+                    'q_type': t.get('q_type'),
+                    'category': t.get('category'),
                     'question': t.get('question'),
                     'keywords': t.get('keywords', []),
                     'text': t.get('text'),
@@ -300,15 +345,51 @@ def run_for_faqs() -> None:
             ],
         }
 
+        # 일반 문서가 아니라 실제 FAQ 원천이 임계값 이상일 때만 EXPAND로 판정한다.
+        best_match = (
+            top[0]
+            if top
+            and top[0].get('source_type') in FAQ_SOURCE_TYPES
+            and top[0].get('rerank_score', 0.0) >= FAQ_MATCH_THRESHOLD
+            else None
+        )
+        matched = [
+            item for item in top
+            if item.get('source_type') in FAQ_SOURCE_TYPES
+            and item.get('rerank_score', 0.0) >= FAQ_MATCH_THRESHOLD
+        ]
+        record.update({
+            'candidateType': 'EXPAND' if best_match else 'NEW',
+            'qType': best_match.get('q_type') if best_match else None,
+            'category': best_match.get('category') if best_match else None,
+            'similarQuestions': c.get('similarQuestions') or similar_by_cluster.get(c['clusterLabel'], []),
+            'matchedFaqs': [
+                {
+                    'matchedFaqSeqNum': item.get('source_seq_num'),
+                    'matchScore': round(item.get('rerank_score', 0.0), 4),
+                }
+                for item in matched
+                if item.get('source_seq_num') is not None
+            ],
+        })
+        # 후속 답변 생성·백엔드 payload 단계가 같은 파일을 읽을 수 있도록
+        # 원본 faqCandidates에도 새 API 계약 필드를 반영한다.
+        c.update({
+            'candidateType': record['candidateType'],
+            'qType': record['qType'],
+            'category': record['category'],
+            'similarQuestions': record['similarQuestions'],
+            'matchedFaqs': record['matchedFaqs'],
+        })
         results.append(record)
 
-        best = top[0] if top else None
+        display_best = top[0] if top else None
 
-        if best:
+        if display_best:
             print(
                 f'  [{i:>2}/{len(faqs)}] C{c["clusterLabel"]:>2}  '
-                f'top={best["rerank_score"]:.3f}  '
-                f'q="{q[:36]}" → "{str(best.get("page_label", ""))[:20]}"  '
+                f'top={display_best["rerank_score"]:.3f}  '
+                f'q="{q[:36]}" → "{str(display_best.get("page_label", ""))[:20]}"  '
                 f'({elapsed:.2f}s)'
             )
         else:
@@ -316,6 +397,10 @@ def run_for_faqs() -> None:
                 f'  [{i:>2}/{len(faqs)}] C{c["clusterLabel"]:>2}  no result'
             )
 
+    FAQ_JSON.write_text(
+        json.dumps({'faqCandidates': candidates}, ensure_ascii=False, indent=2),
+        encoding='utf-8',
+    )
     OUTPUT_JSON.write_text(
         json.dumps(
             {

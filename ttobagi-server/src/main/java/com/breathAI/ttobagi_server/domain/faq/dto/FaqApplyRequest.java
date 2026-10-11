@@ -19,11 +19,13 @@ public class FaqApplyRequest {
     @NotNull(message = "클러스터 PK(ID)는 필수입니다.")
     private Long clusterId;
 
-    @NotNull(message = "클러스터 라벨(번호)은 필수입니다.")
     private Integer clusterLabel;
 
     @NotNull(message = "후보 ID는 필수입니다.") 
     private Long candidateId;
+
+    // 카테고리 코드, 없으면 후보의 값을 사용
+    private Integer qType;
 
    @NotBlank(message = "최종 질문 내용은 필수입니다.")
    private String finalQuestion;

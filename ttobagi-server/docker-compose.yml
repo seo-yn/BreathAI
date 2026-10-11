@@ -1,0 +1,27 @@
+# 로컬 개발용 MariaDB
+# 같은 폴더의 .env 값을 그대로 사용한다
+#   실행: docker compose up -d
+#   종료: docker compose down      (데이터 유지)
+#   초기화: docker compose down -v (데이터 삭제)
+services:
+  mariadb:
+    image: mariadb:11.4
+    container_name: ttobagi-mariadb
+    environment:
+      MARIADB_DATABASE: ttobagi_db
+      MARIADB_USER: ${TTOBAGI_DB_USERNAME}
+      MARIADB_PASSWORD: ${TTOBAGI_DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${TTOBAGI_DB_ROOT_PASSWORD}
+    command: --character-set-server=utf8mb4
+    ports:
+      - "${TTOBAGI_DB_PORT:-3306}:3306"
+    volumes:
+      - ttobagi-mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ttobagi-mariadb-data:
