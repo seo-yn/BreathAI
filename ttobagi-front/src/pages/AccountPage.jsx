@@ -1,46 +1,63 @@
 import { useState } from "react";
-import { authApi } from "../api/index.js";
+import { useNavigate } from "react-router-dom";
+import { authApi } from "../api/auth.js";
+import { useAuth } from "../hooks/useAuth.js";
+import { useToast } from "../hooks/useToast.js";
 
-export default function AccountPage({ user, onLogout }) {
+const PW_PATTERN = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[a-z\d@$!%*?&]{6,20}$/;
+
+export default function AccountPage() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const toast = useToast();
   const [tab, setTab]   = useState("info");
   const [pw, setPw]     = useState({ current: "", next: "", confirm: "" });
-  const [pwMsg, setPwMsg] = useState("");
+  const [pwError, setPwError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const set = (k) => (e) => setPw((p) => ({ ...p, [k]: e.target.value }));
 
   const changePw = async () => {
     if (!pw.current || !pw.next || !pw.confirm) {
-      setPwMsg("error:모든 항목을 입력해주세요.");
+      setPwError("모든 항목을 입력해주세요.");
       return;
     }
     if (pw.next !== pw.confirm) {
-      setPwMsg("error:새 비밀번호가 일치하지 않습니다.");
+      setPwError("새 비밀번호가 일치하지 않습니다.");
       return;
     }
-    if (pw.next.length < 8) {
-      setPwMsg("error:비밀번호는 8자 이상이어야 합니다.");
+    if (!PW_PATTERN.test(pw.next)) {
+      setPwError("비밀번호는 영문 소문자·숫자·특수문자(@$!%*?&)를 포함한 6~20자여야 합니다.");
       return;
     }
     setLoading(true);
-    const token = localStorage.getItem("token");
-    const res = await authApi.updateMe({ 
-      email: user.email,
-      currentPassword: pw.current, 
-      newPassword: pw.next 
-    }, token);
-    setLoading(false);
-    if (res.success) {
-      setPwMsg("ok:비밀번호가 변경되었습니다.");
+    setPwError("");
+    try {
+      await authApi.updateMe({
+        email: user.email,
+        currentPassword: pw.current,
+        newPassword: pw.next,
+      });
+      toast.success("비밀번호가 변경되었습니다.");
       setPw({ current: "", next: "", confirm: "" });
-      setTimeout(() => setPwMsg(""), 3000);
-    } else {
-      setPwMsg("error:비밀번호 변경에 실패했습니다.");
+    } catch (err) {
+      setPwError(err.message || "비밀번호 변경에 실패했습니다.");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const isError = pwMsg.startsWith("error:");
-  const isOk    = pwMsg.startsWith("ok:");
+  const handleLogout = async () => {
+    // 로그아웃은 stateless JWT라 클라이언트에서 토큰을 지우는 게 실제 로그아웃 동작이고,
+    // 서버 호출은 형식상 통지에 가까움 — 실패해도 로그아웃 자체는 막지 않는다.
+    try {
+      await authApi.logout();
+    } catch {
+      // 무시
+    }
+    logout();
+    navigate("/login", { replace: true });
+  };
 
   return (
     <div style={S.page}>
@@ -75,9 +92,6 @@ export default function AccountPage({ user, onLogout }) {
                 </div>
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 4 }}>
-                    {user?.name || "운영자"}
-                  </div>
-                  <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>
                     {user?.email || "admin@seoulmetro.co.kr"}
                   </div>
                   <span style={S.roleBadge}>
@@ -88,16 +102,21 @@ export default function AccountPage({ user, onLogout }) {
 
               {/* 정보 테이블 */}
               {[
-                { label: "이메일",   value: user?.email || "admin@seoulmetro.co.kr" },
-                { label: "이름",     value: user?.name || "운영자" },
+                { label: "이메일",   value: user?.email || "-" },
                 { label: "권한",     value: user?.role === "ADMIN" ? "관리자 (ADMIN)" : "운영자 (USER)" },
-                { label: "계정 상태", value: "활성" },
+                { label: "계정 상태", value: user?.isActive === false ? "비활성" : "활성" },
               ].map((r) => (
                 <div key={r.label} style={S.infoRow}>
                   <span style={S.infoLabel}>{r.label}</span>
                   <span style={S.infoValue}>{r.value}</span>
                 </div>
               ))}
+
+              {user?.role !== "ADMIN" && (
+                <button style={{ ...S.btnOutline, marginTop: 16 }} onClick={() => navigate("/promote")}>
+                  관리자 권한 부여받기
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -123,40 +142,9 @@ export default function AccountPage({ user, onLogout }) {
                 </div>
               ))}
 
-              {pwMsg && (
-                <div style={{
-                  fontSize: 12, marginBottom: 12, padding: "8px 12px", borderRadius: 8,
-                  background: isError ? "#FDECEA" : "#D1FAE5",
-                  color: isError ? "#B91C1C" : "#065F46",
-                }}>
-                  {pwMsg.replace(/^(error|ok):/, "")}
-                </div>
-              )}
-
-              {/* 비밀번호 강도 */}
-              {pw.next.length > 0 && (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 4 }}>
-                    비밀번호 강도
-                  </div>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    {[1, 2, 3, 4].map((n) => {
-                      const strength =
-                        pw.next.length >= 8 ? 1 : 0 +
-                        /[A-Z]/.test(pw.next) ? 1 : 0 +
-                        /[0-9]/.test(pw.next) ? 1 : 0 +
-                        /[^A-Za-z0-9]/.test(pw.next) ? 1 : 0;
-                      const colors = ["#E53935", "#EF9F27", "#43A047", "#1565C0"];
-                      return (
-                        <div key={n} style={{
-                          flex: 1, height: 4, borderRadius: 2,
-                          background: n <= (pw.next.length < 6 ? 1 : pw.next.length < 8 ? 2 : pw.next.length < 12 ? 3 : 4)
-                            ? colors[pw.next.length < 6 ? 0 : pw.next.length < 8 ? 1 : pw.next.length < 12 ? 2 : 3]
-                            : "#F3F4F6",
-                        }} />
-                      );
-                    })}
-                  </div>
+              {pwError && (
+                <div style={{ fontSize: 12, marginBottom: 12, padding: "8px 12px", borderRadius: 8, background: "#FDECEA", color: "#B91C1C" }}>
+                  {pwError}
                 </div>
               )}
 
@@ -179,7 +167,7 @@ export default function AccountPage({ user, onLogout }) {
               <p style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>
                 현재 세션에서 로그아웃합니다. 다시 로그인하면 이전 작업을 계속할 수 있습니다.
               </p>
-              <button style={S.btnOutline} onClick={onLogout}>
+              <button style={S.btnOutline} onClick={handleLogout}>
                 로그아웃
               </button>
             </div>
@@ -191,15 +179,22 @@ export default function AccountPage({ user, onLogout }) {
               <span style={{ ...S.cardTitle, color: "#E53935" }}>⚠️ 위험 구역</span>
             </div>
             <div style={S.cardBody}>
-              <p style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>
+              <p style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>
                 계정을 탈퇴하면 모든 데이터가 삭제되며 복구할 수 없습니다.
               </p>
-              <p style={{ fontSize: 12, color: "#E53935", marginBottom: 16 }}>
-                탈퇴를 원하시면 관리자에게 문의해주세요.
-              </p>
               <button style={S.btnDanger}
-                onClick={() => alert("회원 탈퇴는 관리자(admin@seoulmetro.co.kr)에게 문의해주세요.")}>
-                회원 탈퇴 요청
+                onClick={async () => {
+                  if (!confirm("정말 탈퇴하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
+                  try {
+                    await authApi.quit();
+                    toast.success("탈퇴가 완료되었습니다.");
+                    logout();
+                    navigate("/login", { replace: true });
+                  } catch (err) {
+                    toast.error(err.message || "회원 탈퇴에 실패했습니다.");
+                  }
+                }}>
+                회원 탈퇴
               </button>
             </div>
           </div>

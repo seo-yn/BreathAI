@@ -1,35 +1,39 @@
 import { useState } from "react";
-import { authApi } from "../api/index.js";
+import { useNavigate, Link } from "react-router-dom";
+import { authApi } from "../api/auth.js";
+import { useToast } from "../hooks/useToast.js";
 
-export default function SignupPage({ setPage }) {
-  const [email, setEmail]     = useState("");
-  const [pw, setPw]           = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg]         = useState("");
+const PW_PATTERN = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[a-z\d@$!%*?&]{6,20}$/;
+
+export default function SignupPage() {
+  const [email, setEmail]         = useState("");
+  const [pw, setPw]               = useState("");
+  const [confirm, setConfirm]     = useState("");
+  const [adminCode, setAdminCode] = useState("");
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState("");
+  const toast = useToast();
+  const navigate = useNavigate();
 
   const submit = async () => {
-    if (!email || !pw) { setMsg("error:모든 항목을 입력해주세요."); return; }
-    if (pw !== confirm) { setMsg("error:비밀번호가 일치하지 않습니다."); return; }
-    if (pw.length < 8)  { setMsg("error:비밀번호는 8자 이상이어야 합니다."); return; }
+    if (!email || !pw) { setError("모든 항목을 입력해주세요."); return; }
+    if (pw !== confirm) { setError("비밀번호가 일치하지 않습니다."); return; }
+    if (!PW_PATTERN.test(pw)) {
+      setError("비밀번호는 영문 소문자·숫자·특수문자(@$!%*?&)를 포함한 6~20자여야 합니다.");
+      return;
+    }
     setLoading(true);
+    setError("");
     try {
-      const res = await authApi.signup(email, pw);
-      if (res.success) {
-        setMsg("ok:가입 완료! 로그인 해주세요.");
-        setTimeout(() => setPage("login"), 1800);
-      } else {
-        setMsg("error:이미 사용 중인 이메일입니다.");
-      }
-    } catch {
-      setMsg("error:회원가입에 실패했습니다.");
+      await authApi.signup(email, pw, adminCode || undefined);
+      toast.success("가입 완료! 로그인 해주세요.");
+      navigate("/login", { replace: true });
+    } catch (err) {
+      setError(err.message || "회원가입에 실패했습니다.");
     } finally {
       setLoading(false);
     }
   };
-
-  const isError = msg.startsWith("error:");
-  const isOk    = msg.startsWith("ok:");
 
   return (
     <div style={S.page}>
@@ -46,7 +50,7 @@ export default function SignupPage({ setPage }) {
 
           {[
             { label: "이메일", type: "email", ph: "admin@seoulmetro.co.kr", val: email, set: setEmail },
-            { label: "비밀번호 (8자 이상)", type: "password", ph: "영문+숫자+특수문자", val: pw, set: setPw },
+            { label: "비밀번호 (영문 소문자·숫자·특수문자 포함 6~20자)", type: "password", ph: "예: abc123!@", val: pw, set: setPw },
             { label: "비밀번호 확인", type: "password", ph: "비밀번호 재입력", val: confirm, set: setConfirm },
           ].map((f) => (
             <div key={f.label} style={{ marginBottom: 14 }}>
@@ -56,11 +60,13 @@ export default function SignupPage({ setPage }) {
             </div>
           ))}
 
-          {msg && (
-            <p style={{ fontSize: 12, color: isError ? "#DC2626" : "#16A34A", marginTop: 4 }}>
-              {msg.replace(/^(error|ok):/, "")}
-            </p>
-          )}
+          <div style={{ marginBottom: 14 }}>
+            <label style={S.label}>관리자 코드 (선택 — 있으면 즉시 관리자로 가입됩니다)</label>
+            <input style={S.input} type="text" placeholder="관리자가 아니면 비워두세요"
+              value={adminCode} onChange={(e) => setAdminCode(e.target.value)} />
+          </div>
+
+          {error && <p style={{ fontSize: 12, color: "#DC2626", marginTop: 4 }}>{error}</p>}
 
           <button style={{ ...S.btn, marginTop: 10, opacity: loading ? 0.7 : 1 }}
             onClick={submit} disabled={loading}>
@@ -68,7 +74,7 @@ export default function SignupPage({ setPage }) {
           </button>
 
           <div style={{ textAlign: "center", marginTop: 16, fontSize: 13 }}>
-            <span style={S.link} onClick={() => setPage("login")}>로그인으로 돌아가기</span>
+            <Link to="/login" style={S.link}>로그인으로 돌아가기</Link>
           </div>
         </div>
       </div>

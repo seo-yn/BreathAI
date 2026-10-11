@@ -1,58 +1,114 @@
-import { useState, useEffect } from "react";
-import { faqApi, dashApi } from "../api/index.js";
+import { useState, useEffect, useCallback } from "react";
+import { faqApi } from "../api/faq.js";
+import { dashApi } from "../api/dashboard.js";
+import MatchedFaqBadge from "../components/MatchedFaqBadge.jsx";
+import { isAccepted } from "../utils/reviewStatus.js";
+import { useToast } from "../hooks/useToast.js";
+
+const PAGE_SIZE = 10;
 
 export default function FaqPage() {
   const [tab, setTab]               = useState("list");
   const [faqs, setFaqs]             = useState([]);
+  const [page, setPage]             = useState(0);
+  const [pageInfo, setPageInfo]     = useState({ totalCount: 0, totalPages: 0 });
   const [candidates, setCandidates] = useState([]);
+  const [analyzeResult, setAnalyzeResult] = useState(null);
   const [search, setSearch]         = useState("");
   const [loading, setLoading]       = useState(true);
   const [modal, setModal]           = useState(null);
+  const [reviewing, setReviewing]   = useState(null); // 반영 중인 candidateId
   const [latestAnalysisId, setLatestAnalysisId] = useState(null);
+  const toast = useToast();
+
+  // 백엔드 FaqController가 page/size로 서버 페이징하므로(기본 size=10)
+  // 파라미터를 넘기지 않으면 10건만 받게 된다. 목록 요청은 전부 이 함수를 거친다.
+  const loadFaqs = useCallback(async (targetPage) => {
+    const res = await faqApi.getList({ page: targetPage, size: PAGE_SIZE });
+    setFaqs(res.data?.faqList || []);
+    setPageInfo({
+      totalCount: res.data?.totalCount ?? 0,
+      totalPages: res.data?.totalPages ?? 0,
+    });
+  }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-
     // 최신 analysisId 먼저 가져오기
-    dashApi.getAnalysisHistory(0, 1, token).then((histRes) => {
+    dashApi.getAnalysisHistory(0, 1).then((histRes) => {
       const latestId = histRes.data?.history?.[0]?.analysisId || null;
       setLatestAnalysisId(latestId);
 
-      const requests = [faqApi.getList(0, 50, token)];
-      if (latestId) requests.push(faqApi.getCandidates(latestId, token));
+      const requests = [loadFaqs(0)];
+      if (latestId) {
+        requests.push(faqApi.getCandidates(latestId));
+        // 후보가 기존 학습데이터의 어떤 항목과 겹치는지(matchedFaqs)는
+        // 추천 응답엔 없고 분석 결과 응답에만 있어서 함께 받아온다.
+        requests.push(dashApi.getFileAnalyzeResult(latestId).catch(() => null));
+      }
 
-      Promise.all(requests).then(([listRes, candRes]) => {
-        setFaqs(listRes.data?.faqList || []);
+      Promise.all(requests).then(([, candRes, resultRes]) => {
         setCandidates(candRes?.data?.recommendations || []);
-        setLoading(false);
-      });
-    }).catch(() => setLoading(false));
+        setAnalyzeResult(resultRes?.data || null);
+      }).catch((err) => toast.error(err.message || "FAQ 목록을 불러오지 못했습니다."))
+        .finally(() => setLoading(false));
+    }).catch((err) => {
+      toast.error(err.message || "분석 이력을 불러오지 못했습니다.");
+      setLoading(false);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const goToPage = async (next) => {
+    if (next < 0 || (pageInfo.totalPages > 0 && next >= pageInfo.totalPages)) return;
+    try {
+      await loadFaqs(next);
+      setPage(next);
+      setSearch("");
+    } catch (err) {
+      toast.error(err.message || "FAQ 목록을 불러오지 못했습니다.");
+    }
+  };
+
+  const matchedFaqsById = {};
+  (analyzeResult?.faqCandidates || []).forEach((c) => {
+    if (c.candidateId != null) matchedFaqsById[c.candidateId] = c.matchedFaqs || [];
+  });
+
   const handleReview = async (candidateId, action) => {
-    const token = localStorage.getItem("token");
     const c = candidates.find((x) => x.candidateId === candidateId);
     if (!c) return;
 
     if (action === "ACCEPT") {
-      if (!c.standardQuestion) {
-        alert("표준 질문이 없는 후보는 승인할 수 없습니다.");
+      if (!c.standardQuestion || !c.answerDraft) {
+        toast.error("표준 질문 또는 답변 초안이 비어 있는 후보는 승인할 수 없습니다.");
         return;
       }
-      const applyRes = await faqApi.apply({
-        analysisId: latestAnalysisId,
-        clusterId: c.clusterId,
-        clusterLabel: c.clusterLabel,
-        candidateId: c.candidateId,
-        finalQuestion: c.standardQuestion,
-        finalAnswer: c.answerDraft,
-        keywords: c.representativeKeywords || [],
-        isManualPatchConfirmed: false,
-      }, token);
-
-      if (applyRes.success) {
-        const listRes = await faqApi.getList(0, 50, token);
-        setFaqs(listRes.data?.faqList || []);
+      // 백엔드 FaqApplyRequest.keywords가 @NotEmpty라 빈 배열은 400이 된다
+      if (!c.representativeKeywords?.length) {
+        toast.error("대표 키워드가 없는 후보는 승인할 수 없습니다.");
+        return;
+      }
+      setReviewing(candidateId);
+      try {
+        await faqApi.apply({
+          analysisId: latestAnalysisId,
+          clusterId: c.clusterId,
+          clusterLabel: c.clusterLabel,
+          candidateId: c.candidateId,
+          finalQuestion: c.standardQuestion,
+          finalAnswer: c.answerDraft,
+          keywords: c.representativeKeywords,
+          isManualPatchConfirmed: false,
+        });
+        // 신규 FAQ는 createdAt 내림차순 정렬이라 첫 페이지에 들어온다
+        await loadFaqs(0);
+        setPage(0);
+        toast.success("FAQ에 반영되었습니다.");
+      } catch (err) {
+        toast.error(err.message || "FAQ 반영에 실패했습니다.");
+        return;
+      } finally {
+        setReviewing(null);
       }
     }
 
@@ -66,27 +122,56 @@ export default function FaqPage() {
   };
 
   const handleUpdate = async (faq) => {
-    const token = localStorage.getItem("token");
-    await faqApi.update(faq.faqId, {
-      question: faq.question,
-      answer: faq.answer,
-      keywords: faq.keywords,
-    }, token);
-    setFaqs((prev) => prev.map((f) => f.faqId === faq.faqId ? faq : f));
-    setModal(null);
+    try {
+      await faqApi.update(faq.faqId, {
+        question: faq.question,
+        answer: faq.answer,
+        keywords: faq.keywords,
+      });
+      setFaqs((prev) => prev.map((f) => f.faqId === faq.faqId ? faq : f));
+      toast.success("FAQ가 수정되었습니다.");
+      setModal(null);
+    } catch (err) {
+      toast.error(err.message || "FAQ 수정에 실패했습니다.");
+    }
+  };
+
+  const openHistory = async (faqId) => {
+    setModal({ type: "history", data: null });
+    try {
+      const res = await faqApi.getHistory(faqId);
+      setModal({ type: "history", data: res.data?.histories || [] });
+    } catch (err) {
+      toast.error(err.message || "수정 이력을 불러오지 못했습니다.");
+      setModal(null);
+    }
   };
 
   const handleDelete = async (faqId) => {
-    const token = localStorage.getItem("token");
-    await faqApi.remove(faqId, token);
-    setFaqs((prev) => prev.filter((f) => f.faqId !== faqId));
+    if (!confirm("이 FAQ를 삭제하시겠습니까?")) return;
+    try {
+      await faqApi.remove(faqId);
+      toast.success("FAQ가 삭제되었습니다.");
+      // 삭제 후 총 개수/페이지 수가 바뀌므로 서버에서 현재 페이지를 다시 받는다.
+      // 마지막 페이지의 마지막 항목을 지웠으면 빈 페이지가 되니 한 칸 앞으로.
+      const isLastItemOnPage = faqs.length === 1 && page > 0;
+      const target = isLastItemOnPage ? page - 1 : page;
+      await loadFaqs(target);
+      setPage(target);
+    } catch (err) {
+      toast.error(err.message || "FAQ 삭제에 실패했습니다.");
+    }
   };
 
-  const filteredFaqs = faqs.filter((f) =>
-    f.question?.includes(search) ||
-    f.answer?.includes(search) ||
-    f.keywords?.some((k) => k.includes(search))
-  );
+  // 백엔드가 keyword 파라미터를 받지 않아 서버 검색이 불가하다.
+  // 받아온 현재 페이지 안에서만 걸러내므로, 플레이스홀더에 그 범위를 명시한다.
+  const filteredFaqs = search
+    ? faqs.filter((f) =>
+        f.question?.includes(search) ||
+        f.answer?.includes(search) ||
+        f.keywords?.some((k) => k.includes(search))
+      )
+    : faqs;
 
   const pendingCount = candidates.filter((c) => c.reviewStatus === "PENDING").length;
 
@@ -99,7 +184,7 @@ export default function FaqPage() {
 
       <div style={S.tabs}>
         {[
-          { key: "list",      label: `FAQ 리스트 (${faqs.length})` },
+          { key: "list",      label: `FAQ 리스트 (${pageInfo.totalCount})` },
           { key: "recommend", label: `FAQ 후보 추천${pendingCount > 0 ? ` (검토 필요 ${pendingCount})` : ""}` },
         ].map((t) => (
           <div key={t.key}
@@ -114,9 +199,13 @@ export default function FaqPage() {
       {tab === "list" && (
         <div>
           <div style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "center" }}>
-            <input style={S.searchInput} placeholder="질문, 답변, 키워드로 검색..."
+            <input style={S.searchInput} placeholder="이 페이지 안에서 검색..."
               value={search} onChange={(e) => setSearch(e.target.value)} />
-            <span style={{ fontSize: 12, color: "#6B7280" }}>총 {filteredFaqs.length}개</span>
+            <span style={{ fontSize: 12, color: "#6B7280" }}>
+              총 {pageInfo.totalCount.toLocaleString()}개
+              {pageInfo.totalPages > 1 && ` · ${page + 1}/${pageInfo.totalPages} 페이지`}
+              {search && ` · 이 페이지에서 ${filteredFaqs.length}개 일치`}
+            </span>
           </div>
 
           {filteredFaqs.length === 0 ? (
@@ -133,8 +222,12 @@ export default function FaqPage() {
                     </div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, marginLeft: 16 }}>
-                    {f.qaCnt > 0 && <span style={S.qaCnt}>누적 {f.qaCnt.toLocaleString()}건</span>}
+                    {/* 누적 질의 수(qaCnt)는 FaqListResponse.FaqItem에 없어 목록에서 쓸 수 없다.
+                        대신 FaqItem이 실제로 내려주는 createdAt을 보여준다
+                        (qaCnt 추가 요청은 docs/backend-api-requests.md 참고) */}
+                    {f.createdAt && <span style={S.qaCnt}>{f.createdAt} 등록</span>}
                     <div style={{ display: "flex", gap: 6 }}>
+                      <button style={S.btnSm} onClick={() => openHistory(f.faqId)}>이력</button>
                       <button style={S.btnSm} onClick={() => setModal({ type: "edit", data: f })}>수정</button>
                       <button style={S.btnSmDanger} onClick={() => handleDelete(f.faqId)}>삭제</button>
                     </div>
@@ -142,6 +235,16 @@ export default function FaqPage() {
                 </div>
               </div>
             ))
+          )}
+
+          {pageInfo.totalPages > 1 && (
+            <div style={S.pager}>
+              <button style={S.btnSm} disabled={page === 0} onClick={() => goToPage(page - 1)}>← 이전</button>
+              <span style={{ fontSize: 12, color: "#6B7280" }}>
+                {page + 1} / {pageInfo.totalPages}
+              </span>
+              <button style={S.btnSm} disabled={page >= pageInfo.totalPages - 1} onClick={() => goToPage(page + 1)}>다음 →</button>
+            </div>
           )}
         </div>
       )}
@@ -159,7 +262,7 @@ export default function FaqPage() {
             candidates.map((c) => (
               <div key={c.candidateId} style={{
                 ...S.candCard,
-                borderLeft: `4px solid ${(c.reviewStatus === "ACCEPTED" || c.reviewStatus === "APPLIED") ? "#43A047" : c.reviewStatus === "REJECTED" ? "#E53935" : "#1565C0"}`,
+                borderLeft: `4px solid ${isAccepted(c.reviewStatus) ? "#43A047" : c.reviewStatus === "REJECTED" ? "#E53935" : "#1565C0"}`,
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
                   <div style={{ flex: 1 }}>
@@ -172,6 +275,7 @@ export default function FaqPage() {
                         {c.candidateType === "NEW" ? "신규 FAQ" : "키워드 확장"}
                       </span>
                       <span style={{ fontSize: 11, color: "#9CA3AF" }}>매칭 {c.occurrenceCount}건</span>
+                      <MatchedFaqBadge matches={matchedFaqsById[c.candidateId]} candidateType={c.candidateType} />
                     </div>
                     <div style={S.faqQ}>{c.standardQuestion}</div>
                   </div>
@@ -179,16 +283,20 @@ export default function FaqPage() {
                   {c.reviewStatus === "PENDING" ? (
                     <div style={{ display: "flex", gap: 6, marginLeft: 12 }}>
                       <button style={S.btnSm} onClick={() => setModal({ type: "detail", data: c })}>상세보기</button>
-                      <button style={S.btnAccept} onClick={() => handleReview(c.candidateId, "ACCEPT")}>✓ 승인</button>
-                      <button style={S.btnReject} onClick={() => handleReview(c.candidateId, "REJECT")}>✗ 반려</button>
+                      <button style={S.btnAccept} disabled={reviewing === c.candidateId}
+                        onClick={() => handleReview(c.candidateId, "ACCEPT")}>
+                        {reviewing === c.candidateId ? "반영 중..." : "✓ 승인"}
+                      </button>
+                      <button style={S.btnReject} disabled={reviewing === c.candidateId}
+                        onClick={() => handleReview(c.candidateId, "REJECT")}>✗ 반려</button>
                     </div>
                   ) : (
                     <span style={{
                       fontSize: 12, fontWeight: 500, padding: "4px 14px", borderRadius: 20, marginLeft: 12,
-                      background: (c.reviewStatus === "ACCEPTED" || c.reviewStatus === "APPLIED") ? "#D1FAE5" : "#FDECEA",
-                      color: (c.reviewStatus === "ACCEPTED" || c.reviewStatus === "APPLIED") ? "#065F46" : "#B91C1C",
+                      background: isAccepted(c.reviewStatus) ? "#D1FAE5" : "#FDECEA",
+                      color: isAccepted(c.reviewStatus) ? "#065F46" : "#B91C1C",
                     }}>
-                      {(c.reviewStatus === "ACCEPTED" || c.reviewStatus === "APPLIED") ? "✅ 승인됨" : "❌ 반려됨"}
+                      {isAccepted(c.reviewStatus) ? "✅ 승인됨" : "❌ 반려됨"}
                     </span>
                   )}
                 </div>
@@ -272,6 +380,40 @@ export default function FaqPage() {
         </div>
       )}
 
+      {/* ── 수정 이력 모달 ── */}
+      {modal?.type === "history" && (
+        <div style={S.modalBg} onClick={() => setModal(null)}>
+          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>FAQ 수정 이력</div>
+            {modal.data === null ? (
+              <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: 20 }}>불러오는 중...</div>
+            ) : modal.data.length === 0 ? (
+              <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: 20 }}>수정 이력이 없습니다.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14, maxHeight: 420, overflowY: "auto" }}>
+                {modal.data.map((h) => (
+                  <div key={h.historyId} style={S.historyItem}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                      <span style={{ fontSize: 11, color: "#6B7280" }}>{h.editedBy || "-"}</span>
+                      <span style={{ fontSize: 11, color: "#9CA3AF" }}>{h.createdAt}</span>
+                    </div>
+                    <div style={{ fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: "#B91C1C", textDecoration: "line-through" }}>{h.beforeQuestion}</span>
+                      {" → "}
+                      <span style={{ color: "#065F46" }}>{h.afterQuestion}</span>
+                    </div>
+                    {h.editReason && <div style={{ fontSize: 11, color: "#6B7280" }}>사유: {h.editReason}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={S.modalActions}>
+              <button style={S.btnSm} onClick={() => setModal(null)}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── 수정 모달 ── */}
       {modal?.type === "edit" && (
         <div style={S.modalBg} onClick={() => setModal(null)}>
@@ -343,5 +485,7 @@ const S = {
   modalTitle:  { fontSize: 17, fontWeight: 700, color: "#111827", marginBottom: 16 },
   modalLabel:  { fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 5, display: "block" },
   modalValue:  { fontSize: 13, color: "#111827" },
+  historyItem: { padding: "12px 14px", background: "#F9FAFB", borderRadius: 8, border: "1px solid #F3F4F6" },
   modalActions:{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 },
+  pager:       { display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 16 },
 };

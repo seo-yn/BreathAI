@@ -1,11 +1,15 @@
-export default function Sidebar({ currentPage, setPage }) {
-  const NAV = [
-    { key: "dashboard", icon: "📊", label: "대시보드" },
-    { key: "analyze",   icon: "🔍", label: "신규 데이터 분석" },
-    { key: "faq",       icon: "📋", label: "FAQ 후보 관리" },
-    { key: "account",   icon: "👤", label: "계정 관리" },
-  ];
+import { NavLink } from "react-router-dom";
 
+const NAV = [
+  { to: "/dashboard", icon: "📊", label: "대시보드" },
+  { to: "/analyze",   icon: "🔍", label: "신규 데이터 분석" },
+  { to: "/faq",       icon: "📋", label: "FAQ 후보 관리" },
+  { to: "/training-data", icon: "📚", label: "기존 학습데이터" },
+  { to: "/faq/versions", icon: "🗂️", label: "FAQ 버전 관리" },
+  { to: "/account",   icon: "👤", label: "계정 관리" },
+];
+
+export default function Sidebar() {
   return (
     <div style={S.sidebar}>
       <div style={S.logo}>
@@ -19,12 +23,11 @@ export default function Sidebar({ currentPage, setPage }) {
       <nav style={{ flex: 1 }}>
         <div style={S.section}>메뉴</div>
         {NAV.map((n) => (
-          <div key={n.key}
-            style={{ ...S.navItem, ...(currentPage === n.key ? S.navActive : {}) }}
-            onClick={() => setPage(n.key)}>
+          <NavLink key={n.to} to={n.to}
+            style={({ isActive }) => ({ ...S.navItem, ...(isActive ? S.navActive : {}) })}>
             <span>{n.icon}</span>
             <span>{n.label}</span>
-          </div>
+          </NavLink>
         ))}
       </nav>
 
@@ -39,7 +42,7 @@ const S = {
   logoText:    { fontSize: 14, fontWeight: 700, color: "#fff" },
   logoSub:     { fontSize: 10, color: "rgba(255,255,255,.5)" },
   section:     { fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,.4)", letterSpacing: ".08em", textTransform: "uppercase", padding: "16px 20px 6px" },
-  navItem:     { display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", fontSize: 13, color: "rgba(255,255,255,.7)", cursor: "pointer", borderLeft: "3px solid transparent", transition: "all .15s" },
+  navItem:     { display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", fontSize: 13, color: "rgba(255,255,255,.7)", cursor: "pointer", borderLeft: "3px solid transparent", transition: "all .15s", textDecoration: "none" },
   navActive:   { background: "rgba(255,255,255,.1)", color: "#fff", borderLeftColor: "#64B5F6" },
   footer:      { padding: "14px 20px", borderTop: "1px solid rgba(255,255,255,.1)", fontSize: 11, color: "rgba(255,255,255,.3)" },
 };

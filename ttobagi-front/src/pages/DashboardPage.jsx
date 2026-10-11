@@ -1,25 +1,28 @@
 import { useEffect, useState } from "react";
-import { dashApi } from "../api/index.js";
+import { dashApi } from "../api/dashboard.js";
+import { useToast } from "../hooks/useToast.js";
 
 export default function DashboardPage() {
   const [usage, setUsage]       = useState(null);
   const [analyze, setAnalyze]   = useState(null);
   const [loading, setLoading]   = useState(true);
+  const toast = useToast();
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
     const now = new Date();
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
 
     Promise.all([
-      dashApi.getUsage(year, month, token),
-      dashApi.getAnalyzeResult("", "", token),
+      dashApi.getUsage(year, month),
+      dashApi.getAnalyzeResult(),
     ]).then(([usageRes, analyzeRes]) => {
       if (usageRes.data)   setUsage(usageRes.data);
       if (analyzeRes.data) setAnalyze(analyzeRes.data);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch((err) => {
+      toast.error(err.message || "대시보드 데이터를 불러오지 못했습니다.");
+    }).finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (loading) return <div style={{ padding: 40, color: "#6B7280" }}>불러오는 중...</div>;
@@ -28,9 +31,7 @@ export default function DashboardPage() {
   const sampling  = system?.samplingStatus;
   const total     = system?.totalLogCount || 1;
   const perf      = analyze?.evaluation;
-  const surges    = analyze?.burstKeywords || [];
   const reasons   = analyze?.unansweredAnalysis?.byReason || [];
-  const dailyUsage = usage?.dailyUsage || [];
 
   return (
     <div style={S.page}>
@@ -41,9 +42,9 @@ export default function DashboardPage() {
       <div style={S.statGrid}>
         {[
           { label: "총 대화 수",      value: (usage?.totalUsageCount || 0).toLocaleString(),                            sub: `전월 대비 ${usage?.increaseRate > 0 ? "+" : ""}${usage?.increaseRate || 0}%`, color: "#111827" },
-          { label: "정답 (≥75%)",     value: `${total ? ((sampling?.correct / total) * 100).toFixed(1) : 0}%`,          sub: `${(sampling?.correct || 0).toLocaleString()}건`,    color: "#1565C0" },
-          { label: "오답변 (25~75%)", value: `${total ? ((sampling?.lowQuality / total) * 100).toFixed(1) : 0}%`,       sub: `${(sampling?.lowQuality || 0).toLocaleString()}건`, color: "#7C3AED" },
-          { label: "미답변 (<25%)",   value: `${total ? ((sampling?.unanswered / total) * 100).toFixed(1) : 0}%`,       sub: `${(sampling?.unanswered || 0).toLocaleString()}건`, color: "#EF9F27" },
+          { label: "정답 (≥75%)",     value: `${sampling ? ((sampling.correct / total) * 100).toFixed(1) : 0}%`,          sub: `${(sampling?.correct || 0).toLocaleString()}건`,    color: "#1565C0" },
+          { label: "오답변 (25~75%)", value: `${sampling ? ((sampling.lowQuality / total) * 100).toFixed(1) : 0}%`,       sub: `${(sampling?.lowQuality || 0).toLocaleString()}건`, color: "#7C3AED" },
+          { label: "미답변 (<25%)",   value: `${sampling ? ((sampling.unanswered / total) * 100).toFixed(1) : 0}%`,       sub: `${(sampling?.unanswered || 0).toLocaleString()}건`, color: "#EF9F27" },
         ].map((s) => (
           <div key={s.label} style={S.statCard}>
             <div style={S.statLabel}>{s.label}</div>
@@ -53,49 +54,8 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* 일별 사용량 + 급증 키워드 */}
-      <div style={S.row2}>
-        <div style={S.card}>
-          <div style={S.cardHeader}>
-            <span style={S.cardTitle}>일별 사용량</span>
-          </div>
-          <div style={{ padding: 20, display: "flex", alignItems: "flex-end", gap: 4, height: 140, overflowX: "auto" }}>
-            {dailyUsage.length === 0 && <div style={{ color: "#9CA3AF", fontSize: 12 }}>데이터 없음</div>}
-            {dailyUsage.map((d) => (
-              <div key={d.date} style={{ flex: 1, minWidth: 8, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                <div style={{
-                  width: "100%", minWidth: 8,
-                  height: `${Math.min((d.count / Math.max(...dailyUsage.map(x => x.count))) * 100, 100)}px`,
-                  background: "#1976D2", borderRadius: "3px 3px 0 0",
-                }} />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={S.card}>
-          <div style={S.cardHeader}><span style={S.cardTitle}>⚡ 급증 키워드</span></div>
-          <div style={{ padding: 0 }}>
-            {surges.length === 0 && <div style={{ padding: 20, color: "#9CA3AF", fontSize: 12 }}>데이터 없음</div>}
-            {surges.map((s, i) => (
-              <div key={s.keyword} style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "12px 20px",
-                borderBottom: i < surges.length - 1 ? "1px solid #F3F4F6" : "none",
-              }}>
-                <span style={{ fontSize: 13, fontWeight: 500, color: "#111827" }}>{s.keyword}</span>
-                <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 12 }}>
-                  <span style={{ color: "#6B7280" }}>{s.count}건</span>
-                  <span style={{ color: "#E53935", fontWeight: 600 }}>↑ {s.increasedRate}%</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
       {/* 미답변 사유 + 성능 비교 */}
-      <div style={{ ...S.row2, marginTop: 16 }}>
+      <div style={S.row2}>
         <div style={S.card}>
           <div style={S.cardHeader}><span style={S.cardTitle}>미답변 사유 분석</span></div>
           <div style={{ padding: 20 }}>

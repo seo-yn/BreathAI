@@ -1,12 +1,18 @@
 import { useState } from "react";
-import { authApi } from "../api/index.js";
+import { useNavigate, Link } from "react-router-dom";
+import { authApi } from "../api/auth.js";
+import { useAuth } from "../hooks/useAuth.js";
+import { useToast } from "../hooks/useToast.js";
 
-export default function LoginPage({ onLogin, setPage }) {
+export default function LoginPage() {
   const [email, setEmail]       = useState("");
   const [pw, setPw]             = useState("");
   const [remember, setRemember] = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState("");
+  const { login } = useAuth();
+  const toast = useToast();
+  const navigate = useNavigate();
 
   const submit = async () => {
     if (!email || !pw) { setError("이메일과 비밀번호를 입력해주세요."); return; }
@@ -14,16 +20,11 @@ export default function LoginPage({ onLogin, setPage }) {
     setError("");
     try {
       const res = await authApi.login(email, pw);
-      if (res.success && res.data?.accessToken) {
-        localStorage.setItem("token", res.data.accessToken);
-        localStorage.setItem("refreshToken", res.data.refreshToken);
-        const meRes = await authApi.getMe(res.data.accessToken);
-        onLogin(meRes.data);
-      } else {
-        setError("이메일 또는 비밀번호가 올바르지 않습니다.");
-      }
-    } catch {
-      setError("서버 연결에 실패했습니다.");
+      await login(res.data);
+      toast.success("로그인되었습니다.");
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setError(err.message || "이메일 또는 비밀번호가 올바르지 않습니다.");
     } finally {
       setLoading(false);
     }
@@ -47,10 +48,6 @@ export default function LoginPage({ onLogin, setPage }) {
         {/* 왼쪽 — 설명 */}
         <div style={S.cardLeft}>
           <div style={S.cardLeftInner}>
-            <div style={S.cardCircle1} />
-            <div style={S.cardCircle2} />
-            <div style={S.cardRect1} />
-            <div style={S.cardRect2} />
             <div style={{ position: "relative", zIndex: 2 }}>
               <div style={S.leftTitle}>또타24<br />현행화 시스템</div>
               <div style={S.leftSub}>
@@ -98,9 +95,7 @@ export default function LoginPage({ onLogin, setPage }) {
                 style={{ marginRight: 6, accentColor: "#1565C0" }} />
               로그인 상태 유지
             </label>
-            <span style={S.link} onClick={() => setPage("reset")}>
-              비밀번호 찾기
-            </span>
+            <Link to="/reset" style={S.link}>비밀번호 찾기</Link>
           </div>
 
           {error && <div style={S.error}>{error}</div>}
@@ -121,14 +116,9 @@ export default function LoginPage({ onLogin, setPage }) {
           {/* 회원가입 */}
           <div style={{ textAlign: "center", fontSize: 13 }}>
             <span style={{ color: "#6B7280", marginRight: 4 }}>계정이 없으신가요?</span>
-            <span style={S.link} onClick={() => setPage("signup")}>회원가입</span>
+            <Link to="/signup" style={S.link}>회원가입</Link>
           </div>
 
-          {/* 관리자 권한 부여 */}
-          <div style={{ textAlign: "center", fontSize: 12, marginTop: 8 }}>
-            <span style={{ color: "#9CA3AF", marginRight: 4 }}>관리자 권한이 필요하신가요?</span>
-            <span style={S.link} onClick={() => setPage("promote")}>권한 부여</span>
-          </div>
         </div>
       </div>
     </div>
@@ -174,10 +164,6 @@ const S = {
     padding: "40px 36px",
     position: "relative",
   },
-  //cardCircle1: { position: "absolute", top: -40, left: -40, width: 160, height: 160, borderRadius: "50%", background: "rgba(255,255,255,0.1)" },
-  //cardCircle2: { position: "absolute", top: 30, right: -30, width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.07)" },
-  //cardRect1:   { position: "absolute", top: 60, left: 50, width: 24, height: 80, borderRadius: 12, background: "rgba(255,255,255,0.15)", transform: "rotate(15deg)" },
-  //cardRect2:   { position: "absolute", top: 50, left: 90, width: 18, height: 60, borderRadius: 9,  background: "rgba(255,255,255,0.1)",  transform: "rotate(-10deg)" },
 
   leftTitle: { fontSize: 28, fontWeight: 800, color: "#fff", lineHeight: 1.25, marginBottom: 12, letterSpacing: "-0.5px" },
   leftSub:   { fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 1.8 },
@@ -222,7 +208,7 @@ const S = {
 
   row: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 },
   rememberLabel: { display: "flex", alignItems: "center", fontSize: 12, color: "#6B7280", cursor: "pointer" },
-  link: { fontSize: 12, color: "#1565C0", cursor: "pointer", fontWeight: 500 },
+  link: { fontSize: 12, color: "#1565C0", cursor: "pointer", fontWeight: 500, textDecoration: "none" },
   error: { fontSize: 12, color: "#DC2626", marginBottom: 12, textAlign: "center" },
 
   btn: {
@@ -237,4 +223,14 @@ const S = {
   divider:     { display: "flex", alignItems: "center", gap: 10, margin: "18px 0" },
   dividerLine: { flex: 1, height: 1, background: "#E5E7EB" },
   dividerText: { fontSize: 11, color: "#9CA3AF" },
+
+  bgCircle1: { position: "absolute", top: -80, left: -80, width: 240, height: 240, borderRadius: "50%", background: "rgba(255,255,255,0.08)" },
+  bgCircle2: { position: "absolute", bottom: -100, right: -60, width: 300, height: 300, borderRadius: "50%", background: "rgba(255,255,255,0.06)" },
+  bgCircle3: { position: "absolute", top: "20%", right: "10%", width: 60, height: 60, borderRadius: "50%", background: "rgba(255,255,255,0.1)" },
+  bgCircle4: { position: "absolute", bottom: "15%", left: "8%", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.1)" },
+  bgDot1: { position: "absolute", top: "12%", left: "20%", width: 8, height: 8, borderRadius: "50%", background: "rgba(255,255,255,0.3)" },
+  bgDot2: { position: "absolute", top: "70%", right: "22%", width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.3)" },
+  bgDot3: { position: "absolute", bottom: "8%", right: "40%", width: 10, height: 10, borderRadius: "50%", background: "rgba(255,255,255,0.25)" },
+  bgRect1: { position: "absolute", top: "8%", right: "30%", width: 24, height: 24, borderRadius: 6, background: "rgba(255,255,255,0.08)", transform: "rotate(20deg)" },
+  bgRect2: { position: "absolute", bottom: "20%", left: "30%", width: 18, height: 18, borderRadius: 5, background: "rgba(255,255,255,0.08)", transform: "rotate(-15deg)" },
 };

@@ -1,0 +1,35 @@
+import { createBrowserRouter, Navigate } from "react-router-dom";
+import ProtectedRoute from "./components/ProtectedRoute.jsx";
+import LoginPage from "./pages/LoginPage.jsx";
+import SignupPage from "./pages/SignupPage.jsx";
+import ResetPage from "./pages/ResetPage.jsx";
+import DashboardPage from "./pages/DashboardPage.jsx";
+import AnalyzePage from "./pages/AnalyzePage.jsx";
+import FaqPage from "./pages/FaqPage.jsx";
+import FaqVersionsPage from "./pages/FaqVersionsPage.jsx";
+import TrainingDataPage from "./pages/TrainingDataPage.jsx";
+import AccountPage from "./pages/AccountPage.jsx";
+import AdminPromotePage from "./pages/AdminPromotePage.jsx";
+
+export const router = createBrowserRouter([
+  { path: "/login", element: <LoginPage /> },
+  { path: "/signup", element: <SignupPage /> },
+  { path: "/reset", element: <ResetPage /> },
+  // 메일로 링크가 아니라 6자리 코드를 보내게 바뀌어서 별도 확정 화면이 없어졌다.
+  // 예전 메일의 링크로 들어오는 경우를 위해 /reset으로 넘긴다.
+  { path: "/reset/confirm", element: <Navigate to="/reset" replace /> },
+  {
+    element: <ProtectedRoute />,
+    children: [
+      { path: "/dashboard", element: <DashboardPage /> },
+      { path: "/analyze", element: <AnalyzePage /> },
+      { path: "/faq", element: <FaqPage /> },
+      { path: "/faq/versions", element: <FaqVersionsPage /> },
+      { path: "/training-data", element: <TrainingDataPage /> },
+      { path: "/account", element: <AccountPage /> },
+      { path: "/promote", element: <AdminPromotePage /> },
+    ],
+  },
+  { path: "/", element: <Navigate to="/dashboard" replace /> },
+  { path: "*", element: <Navigate to="/dashboard" replace /> },
+]);

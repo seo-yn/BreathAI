@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
-import { dashApi, faqApi } from "../api/index.js";
 import { ScatterChart, Scatter, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer } from "recharts";
+import { dashApi } from "../api/dashboard.js";
+import { faqApi } from "../api/faq.js";
+import MatchedFaqBadge from "../components/MatchedFaqBadge.jsx";
+import { isAccepted } from "../utils/reviewStatus.js";
+import { useToast } from "../hooks/useToast.js";
 
 const CLUSTER_COLORS = [
   "#1565C0","#43A047","#E53935","#FB8C00","#8E24AA",
@@ -55,117 +59,188 @@ export default function AnalyzePage() {
   const [candidates, setCandidates] = useState([]);
   const [history, setHistory]       = useState([]);
   const [analyzeResult, setAnalyzeResult] = useState(null);
+  const [analysisId, setAnalysisId] = useState(null);
+  const [reviewing, setReviewing]   = useState(null); // 반영 중인 candidateId
+  const [options, setOptions]       = useState({
+    periodStartDate: "",
+    periodEndDate: "",
+    isMaskingEnabled: true,
+    isTranslationEnabled: false,
+    minClusterSize: "",
+    minSamples: "",
+  });
+  const toast = useToast();
+
+  const setOption = (key) => (e) =>
+    setOptions((prev) => ({
+      ...prev,
+      [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value,
+    }));
 
   const STEPS = ["데이터 전처리", "문장 임베딩", "군집화 (HDBSCAN)", "FAQ 초안 생성", "검증 완료"];
 
   useEffect(() => {
-  const token = localStorage.getItem("token");
-  dashApi.getAnalysisHistory(0, 1, token).then((r) => {
-    if (r.data?.history) {
-      setHistory(r.data.history);
-      // 최신 분석이 COMPLETED면 FAQ 후보 자동 로드
-      const latest = r.data.history[0];
-      if (latest?.status === "COMPLETED" && latest?.analysisId) {
-        faqApi.getCandidates(latest.analysisId, token).then((res) => {
-          if (res.data?.recommendations) setCandidates(res.data.recommendations);
-        });
-        dashApi.getFileAnalyzeResult(latest.analysisId, token).then((res) => {
-          if (res.data) setAnalyzeResult(res.data);
-        });
-        setDone(true);
-        setStep(4);
+    // 우측 "분석 이력" 패널이 같은 응답을 쓰므로 1건이 아니라 최근 10건을 받는다
+    dashApi.getAnalysisHistory(0, 10).then((r) => {
+      if (r.data?.history) {
+        setHistory(r.data.history);
+        // 최신 분석이 COMPLETED면 FAQ 후보 자동 로드
+        const latest = r.data.history[0];
+        if (latest?.status === "COMPLETED" && latest?.analysisId) {
+          setAnalysisId(latest.analysisId);
+          faqApi.getCandidates(latest.analysisId).then((res) => {
+            if (res.data?.recommendations) setCandidates(res.data.recommendations);
+          }).catch(() => {});
+          dashApi.getFileAnalyzeResult(latest.analysisId).then((res) => {
+            if (res.data) setAnalyzeResult(res.data);
+          }).catch(() => {});
+          setDone(true);
+          setStep(4);
+        }
       }
-    }
-  });
-}, []);
+    }).catch((err) => toast.error(err.message || "분석 이력을 불러오지 못했습니다."));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleFile = (f) => {
-    if (!f.name.endsWith(".xlsx")) { alert(".xlsx 파일만 업로드 가능합니다."); return; }
+    if (!f.name.endsWith(".xlsx")) { toast.error(".xlsx 파일만 업로드 가능합니다."); return; }
     setFile(f);
   };
 
   const doUpload = async () => {
     if (!file) return;
-    const token = localStorage.getItem("token");
     setUploading(true);
     setRunning(true);
     setDone(false);
     setStep(-1);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const res = await dashApi.uploadAndAnalyze(formData, token);
+      const res = await dashApi.uploadAndAnalyze(file, {
+        periodStartDate: options.periodStartDate,
+        periodEndDate: options.periodEndDate,
+        isMaskingEnabled: options.isMaskingEnabled,
+        isTranslationEnabled: options.isTranslationEnabled,
+        clustering: {
+          minClusterSize: options.minClusterSize,
+          minSamples: options.minSamples,
+        },
+      });
       setUploading(false);
+      setUploadResult(res.data);
+      const analysisId = res.data?.analysisId;
+      if (!analysisId) throw new Error("서버가 분석 ID를 반환하지 않았습니다.");
+      setAnalysisId(analysisId);
 
-      if (res.success && res.data?.analysisId) {
-        setUploadResult(res.data);
-        const analysisId = res.data.analysisId;
+      const loadResults = () => {
+        setStep(4);
+        setDone(true);
+        setRunning(false);
+        faqApi.getCandidates(analysisId).then((r) => {
+          if (r.data?.recommendations) setCandidates(r.data.recommendations);
+        }).catch((err) => toast.error(err.message || "FAQ 후보를 불러오지 못했습니다."));
+        dashApi.getFileAnalyzeResult(analysisId).then((r) => {
+          if (r.data) setAnalyzeResult(r.data);
+        }).catch((err) => toast.error(err.message || "분석 결과를 불러오지 못했습니다."));
+      };
 
-        dashApi.streamAnalysisStatus(
-          analysisId,
-          token,
-          (data) => {
-            const parsed = JSON.parse(data);
-            const status = parsed.status;
-            if (status === "PREPROCESSING") setStep(0);
-            if (status === "ANALYZING")     setStep(2);
-            if (status === "COMPLETED") {
-              setStep(4);
-              setDone(true);
-              setRunning(false);
-              faqApi.getCandidates(analysisId, token).then((r) => {
-                if (r.data?.candidates) setCandidates(r.data.candidates);
-              });
-              dashApi.getFileAnalyzeResult(analysisId, token).then((r) => {
-                if (r.data) setAnalyzeResult(r.data);
-              });
-            }
-            if (status === "FAIL") {
-              setRunning(false);
-              alert("분석에 실패했습니다.");
-            }
-          },
-          () => {
-            const poll = setInterval(async () => {
-              const statusRes = await dashApi.getAnalysisStatus(analysisId, token);
+      dashApi.streamAnalysisStatus(
+        analysisId,
+        (data) => {
+          const parsed = JSON.parse(data);
+          const status = parsed.status;
+          if (status === "PREPROCESSING") setStep(0);
+          if (status === "ANALYZING")     setStep(2);
+          if (status === "COMPLETED")     loadResults();
+          if (status === "FAIL") {
+            setRunning(false);
+            toast.error("분석에 실패했습니다.");
+          }
+        },
+        () => {
+          const poll = setInterval(async () => {
+            try {
+              const statusRes = await dashApi.getAnalysisStatus(analysisId);
               const status = statusRes.data?.status;
               if (status === "PREPROCESSING") setStep(0);
               if (status === "ANALYZING")     setStep(2);
               if (status === "COMPLETED") {
                 clearInterval(poll);
-                setStep(4);
-                setDone(true);
-                setRunning(false);
-                faqApi.getCandidates(analysisId, token).then((r) => {
-                  if (r.data?.candidates) setCandidates(r.data.candidates);
-                });
-                dashApi.getFileAnalyzeResult(analysisId, token).then((r) => {
-                  if (r.data) setAnalyzeResult(r.data);
-                });
+                loadResults();
               }
               if (status === "FAIL") {
                 clearInterval(poll);
                 setRunning(false);
-                alert("분석에 실패했습니다.");
+                toast.error("분석에 실패했습니다.");
               }
-            }, 3000);
-          }
-        );
-      }
-    } catch {
+            } catch (err) {
+              clearInterval(poll);
+              setRunning(false);
+              toast.error(err.message || "분석 상태 조회에 실패했습니다.");
+            }
+          }, 3000);
+        }
+      );
+    } catch (err) {
       setUploading(false);
       setRunning(false);
-      alert("업로드에 실패했습니다.");
+      toast.error(err.message || "업로드에 실패했습니다.");
     }
   };
 
-  const handleCandidate = (id, action) => {
+  // 승인은 POST /api/v1/faq/apply로 실제 gold_faq에 반영해야 한다.
+  // (반려는 백엔드 엔드포인트가 없어 화면 상태로만 남고 새로고침하면 사라진다 —
+  //  docs/backend-api-requests.md 에 명세 제안)
+  const handleCandidate = async (candidateId, action) => {
+    const c = candidates.find((x) => x.candidateId === candidateId);
+    if (!c) return;
+
+    if (action === "ACCEPTED") {
+      if (!analysisId) {
+        toast.error("분석 ID를 확인할 수 없어 반영할 수 없습니다.");
+        return;
+      }
+      if (!c.standardQuestion || !c.answerDraft) {
+        toast.error("표준 질문 또는 답변 초안이 비어 있는 후보는 반영할 수 없습니다.");
+        return;
+      }
+      // 백엔드 FaqApplyRequest.keywords가 @NotEmpty라 빈 배열은 400이 된다
+      if (!c.representativeKeywords?.length) {
+        toast.error("대표 키워드가 없는 후보는 반영할 수 없습니다.");
+        return;
+      }
+
+      setReviewing(candidateId);
+      try {
+        await faqApi.apply({
+          analysisId,
+          clusterId: c.clusterId,
+          clusterLabel: c.clusterLabel,
+          candidateId: c.candidateId,
+          finalQuestion: c.standardQuestion,
+          finalAnswer: c.answerDraft,
+          keywords: c.representativeKeywords,
+          isManualPatchConfirmed: false,
+        });
+        toast.success("FAQ에 반영되었습니다.");
+      } catch (err) {
+        toast.error(err.message || "FAQ 반영에 실패했습니다.");
+        return;
+      } finally {
+        setReviewing(null);
+      }
+    }
+
     setCandidates((prev) =>
-      prev.map((c) => c.candidateId === id ? { ...c, reviewStatus: action } : c)
+      prev.map((x) => x.candidateId === candidateId ? { ...x, reviewStatus: action } : x)
     );
   };
+
+  // 기존 학습데이터 매칭 정보(matchedFaqs)는 FaqCandidateListResponse엔 없고
+  // FileAnalyzeResultResponse.faqCandidates에만 있어서 candidateId로 이어붙인다.
+  const matchedFaqsById = {};
+  (analyzeResult?.faqCandidates || []).forEach((c) => {
+    if (c.candidateId != null) matchedFaqsById[c.candidateId] = c.matchedFaqs || [];
+  });
 
   return (
     <div style={S.page}>
@@ -194,6 +269,11 @@ export default function AnalyzePage() {
                 <span style={S.badge}>1달 분량</span>
               </div>
               <div style={S.cardBody}>
+                {analyzeResult?.clusteringView?.clusterNames && (
+                  <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>
+                    최근 분석 클러스터 <strong style={{ color: "#1565C0" }}>{analyzeResult.clusteringView.clusterNames.length}개</strong>
+                  </div>
+                )}
                 <input type="file" accept=".xlsx" style={{ display: "none" }} id="fileInput"
                   onChange={(e) => handleFile(e.target.files[0])} />
                 <div
@@ -208,6 +288,55 @@ export default function AnalyzePage() {
                   </div>
                   <div style={{ fontSize: 12, color: "#9CA3AF" }}>.xlsx 형식, 최대 50MB</div>
                 </div>
+                <div style={S.optionBox}>
+                  <div style={S.optionTitle}>분석 옵션</div>
+
+                  <div style={S.optionRow}>
+                    <label style={S.optionLabel}>분석 기간</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input type="date" style={S.optionInput}
+                        value={options.periodStartDate} onChange={setOption("periodStartDate")} />
+                      <span style={{ color: "#9CA3AF", fontSize: 12 }}>~</span>
+                      <input type="date" style={S.optionInput}
+                        value={options.periodEndDate} onChange={setOption("periodEndDate")} />
+                    </div>
+                  </div>
+
+                  <div style={S.optionRow}>
+                    <label style={S.optionLabel}>전처리</label>
+                    <div style={{ display: "flex", gap: 14 }}>
+                      <label style={S.checkLabel}>
+                        <input type="checkbox" checked={options.isMaskingEnabled}
+                          onChange={setOption("isMaskingEnabled")} />
+                        개인정보 마스킹
+                      </label>
+                      <label style={S.checkLabel}>
+                        <input type="checkbox" checked={options.isTranslationEnabled}
+                          onChange={setOption("isTranslationEnabled")} />
+                        외국어 번역
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* HDBSCAN은 클러스터 개수를 직접 지정할 수 없어 min_cluster_size로 조절한다.
+                      값을 올리면 클러스터가 적고 커지며, 낮추면 많고 작아진다. */}
+                  <div style={{ ...S.optionRow, borderBottom: "none", paddingBottom: 0 }}>
+                    <label style={S.optionLabel}>
+                      군집화 <span style={S.pendingTag}>백엔드 반영 대기</span>
+                    </label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input type="number" min="2" placeholder="최소 클러스터 크기" style={S.optionInput}
+                        value={options.minClusterSize} onChange={setOption("minClusterSize")} />
+                      <input type="number" min="1" placeholder="최소 샘플 수" style={S.optionInput}
+                        value={options.minSamples} onChange={setOption("minSamples")} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 6, lineHeight: 1.5 }}>
+                    클러스터 개수는 HDBSCAN 특성상 직접 지정할 수 없어 최소 크기로 조절합니다.
+                    값을 키우면 클러스터가 적고 커집니다. (현재 백엔드가 이 두 값을 받지 않아 전송되어도 무시됩니다)
+                  </div>
+                </div>
+
                 {file && !uploadResult && (
                   <button style={{ ...S.btnPrimary, marginTop: 12 }}
                     onClick={doUpload} disabled={uploading}>
@@ -385,20 +514,25 @@ export default function AnalyzePage() {
                     <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginBottom: 4 }}>{c.standardQuestion}</div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
                       <span style={{ color: "#9CA3AF" }}>매칭 {c.occurrenceCount}건</span>
+                      <MatchedFaqBadge matches={matchedFaqsById[c.candidateId]} candidateType={c.candidateType} />
                     </div>
                   </div>
                   {c.reviewStatus === "PENDING" ? (
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button style={S.btnAccept} onClick={() => handleCandidate(c.candidateId, "ACCEPTED")}>✓ 승인</button>
-                      <button style={S.btnReject} onClick={() => handleCandidate(c.candidateId, "REJECTED")}>✗ 반려</button>
+                      <button style={S.btnAccept} disabled={reviewing === c.candidateId}
+                        onClick={() => handleCandidate(c.candidateId, "ACCEPTED")}>
+                        {reviewing === c.candidateId ? "반영 중..." : "✓ 승인"}
+                      </button>
+                      <button style={S.btnReject} disabled={reviewing === c.candidateId}
+                        onClick={() => handleCandidate(c.candidateId, "REJECTED")}>✗ 반려</button>
                     </div>
                   ) : (
                     <span style={{
                       fontSize: 12, fontWeight: 500, padding: "4px 12px", borderRadius: 20,
-                      background: c.reviewStatus === "ACCEPTED" ? "#D1FAE5" : "#FDECEA",
-                      color: c.reviewStatus === "ACCEPTED" ? "#065F46" : "#B91C1C",
+                      background: isAccepted(c.reviewStatus) ? "#D1FAE5" : "#FDECEA",
+                      color: isAccepted(c.reviewStatus) ? "#065F46" : "#B91C1C",
                     }}>
-                      {c.reviewStatus === "ACCEPTED" ? "✅ 승인됨" : "❌ 반려됨"}
+                      {isAccepted(c.reviewStatus) ? "✅ 승인됨" : "❌ 반려됨"}
                     </span>
                   )}
                 </div>
@@ -441,6 +575,13 @@ const S = {
   cardBody:    { padding: 20 },
   badge:       { fontSize: 11, fontWeight: 500, padding: "2px 9px", borderRadius: 20, background: "#DBEAFE", color: "#1E40AF" },
   dropzone:    { border: "2px dashed #D1D5DB", borderRadius: 12, padding: "32px 20px", textAlign: "center", cursor: "pointer", transition: "all .18s", background: "#fff" },
+  optionBox:   { marginTop: 14, padding: "14px 16px", background: "#F9FAFB", borderRadius: 10, border: "1px solid #F3F4F6" },
+  optionTitle: { fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 10 },
+  optionRow:   { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid #F3F4F6" },
+  optionLabel: { fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6 },
+  optionInput: { height: 32, padding: "0 10px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: 132 },
+  checkLabel:  { fontSize: 12, color: "#374151", display: "flex", alignItems: "center", gap: 5, cursor: "pointer" },
+  pendingTag:  { fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 8, background: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" },
   dropzoneDrag:{ borderColor: "#1565C0", background: "#EFF8FF" },
   btnPrimary:  { padding: "10px 20px", background: "#1565C0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   btnAccept:   { padding: "6px 14px", background: "#D1FAE5", color: "#065F46", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
