@@ -105,19 +105,22 @@ async function reissueTokens() {
  * @param {{body?: any, isFormData?: boolean, skipAuthRetry?: boolean}} [opts]
  * skipAuthRetry: 토큰 만료/재발급 로직을 아예 건너뜀 (로그인/회원가입/재발급 자체 호출용)
  */
+async function ensureFreshToken() {
+  // 요청 전에 만료 임박 여부를 먼저 확인해 선제적으로 재발급 (위 설명 참고)
+  if (!isAccessTokenExpiringSoon() || !getStoredTokens().refreshToken) return;
+  try {
+    await reissueTokens();
+  } catch {
+    clearTokens();
+    onAuthExpired?.();
+    throw new ApiError("로그인이 만료되었습니다. 다시 로그인해주세요.", 401, null);
+  }
+}
+
 export async function request(method, path, opts = {}) {
   const { body, isFormData, skipAuthRetry } = opts;
 
-  // 요청 전에 만료 임박 여부를 먼저 확인해 선제적으로 재발급 (위 설명 참고)
-  if (!skipAuthRetry && isAccessTokenExpiringSoon() && getStoredTokens().refreshToken) {
-    try {
-      await reissueTokens();
-    } catch {
-      clearTokens();
-      onAuthExpired?.();
-      throw new ApiError("로그인이 만료되었습니다. 다시 로그인해주세요.", 401, null);
-    }
-  }
+  if (!skipAuthRetry) await ensureFreshToken();
 
   const { accessToken } = getStoredTokens();
   const json = await rawRequest(method, path, body, accessToken, isFormData);
@@ -139,6 +142,70 @@ export async function request(method, path, opts = {}) {
   }
 
   throw new ApiError(json.message, json.status, json.data);
+}
+
+// Content-Disposition에서 파일명을 꺼낸다. 백엔드가 ASCII 파일명(faq_v3_20261011.csv)을
+// 쓰고 있어 filename= 형태지만, 한글 파일명이 되면 filename*=UTF-8''... 로 오므로 둘 다 본다.
+function parseFileName(disposition, fallback) {
+  if (!disposition) return fallback;
+  const utf8 = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8[1]);
+    } catch {
+      /* 디코딩 실패 시 아래 filename= 로 폴백 */
+    }
+  }
+  const plain = disposition.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1] : fallback;
+}
+
+/**
+ * 파일 응답 전용 요청. GET /api/v1/faq/download는 ApiResponse JSON이 아니라
+ * text/csv 본문 + Content-Disposition 헤더로 내려오므로 res.json()을 쓸 수 없다.
+ * 실패 응답은 JSON(ApiResponse)으로 오기 때문에 그때만 파싱해 ApiError로 바꾼다.
+ * @returns {Promise<{blob: Blob, fileName: string}>}
+ */
+export async function requestFile(method, path, fallbackFileName = "download") {
+  await ensureFreshToken();
+
+  const { accessToken } = getStoredTokens();
+  const headers = {};
+  if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, { method, headers });
+  } catch {
+    throw new ApiError("서버에 연결할 수 없습니다.", 0, null);
+  }
+
+  if (!res.ok) {
+    let json = null;
+    try {
+      json = await res.json();
+    } catch {
+      /* 에러 본문이 JSON이 아니면 상태 코드만으로 처리 */
+    }
+    throw new ApiError(json?.message, json?.status ?? res.status, json?.data ?? null);
+  }
+
+  return {
+    blob: await res.blob(),
+    fileName: parseFileName(res.headers.get("Content-Disposition"), fallbackFileName),
+  };
+}
+
+// 받은 파일을 다운로드시킨다. a[download]를 쓰면 Content-Disposition의 파일명을 유지할 수 있다.
+export function saveBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export { BASE_URL };

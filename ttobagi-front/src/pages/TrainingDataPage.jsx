@@ -14,7 +14,7 @@ import { useToast } from "../hooks/useToast.js";
 const PAGE_SIZE = 20;
 
 export default function TrainingDataPage() {
-  const [state, setState] = useState("loading"); // loading | ready | not-implemented
+  const [state, setState] = useState("loading"); // loading | ready | not-implemented | error
   const [rows, setRows] = useState([]);
   const [pageInfo, setPageInfo] = useState({ totalCount: 0, totalPages: 0 });
   const [page, setPage] = useState(0);
@@ -42,11 +42,11 @@ export default function TrainingDataPage() {
         setState("ready");
       })
       .catch((err) => {
-        // 이 백엔드는 미구현 라우트도 404가 아니라 500으로 응답해(GlobalExceptionHandler의
-        // catch-all) 상태 코드로 미구현과 진짜 오류를 구분할 수 없다. FaqVersionsPage와
-        // 동일하게 실패를 전부 "준비 중"으로 안내한다.
+        // GlobalExceptionHandler가 NoResourceFoundException을 처리하게 되면서(PR #34)
+        // 미구현 라우트는 404로 내려온다. 그래서 "아직 없는 기능"과 "진짜 서버 오류"를
+        // 상태 코드로 구분할 수 있다.
         setErrorMessage(err.message || "");
-        setState("not-implemented");
+        setState(err.status === 404 ? "not-implemented" : "error");
       });
   }, [applyResponse]);
 
@@ -89,6 +89,14 @@ export default function TrainingDataPage() {
           {errorMessage && (
             <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 12 }}>서버 응답: {errorMessage}</div>
           )}
+        </div>
+      )}
+
+      {state === "error" && (
+        <div style={S.notice}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>⚠️</div>
+          <div style={{ fontWeight: 600, color: "#374151", marginBottom: 6 }}>학습데이터를 불러오지 못했습니다.</div>
+          <div style={{ fontSize: 13, color: "#6B7280" }}>{errorMessage || "잠시 후 다시 시도해주세요."}</div>
         </div>
       )}
 

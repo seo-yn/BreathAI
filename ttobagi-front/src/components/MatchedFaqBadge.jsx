@@ -1,25 +1,25 @@
-// FAQ 후보가 기존 챗봇 학습데이터(bronze_counselling_info)의 어떤 질문-답변 쌍과
-// 겹치는지 보여주는 뱃지. 백엔드가 콜백으로 받아 FaqCandidateMatch에 저장한
-// matchedFaqSeqNum / matchScore를 그대로 쓴다.
+// FAQ 후보가 기존 챗봇 학습데이터의 어떤 질문-답변 쌍과 겹치는지 보여주는 뱃지.
+// 백엔드 FaqCandidateListResponse.FaqCandidateItem.matchedFaqs를 그대로 쓴다.
+// matchedFaqId와 question은 해당 항목이 운영 FAQ(gold_faq)에 없으면 null이고,
+// matchedFaqSeqNum은 bronze_counselling_info.seq_num이다.
 //
-// 후보 타입(candidateType)이 EXPAND면 "기존 FAQ의 키워드 확장"이라는 뜻이므로,
-// 승인 시 신규 FAQ가 아니라 기존 항목을 갱신해야 한다는 점을 검토자에게 알린다.
-// (현재 백엔드 applyFaqCandidate는 타입을 보지 않고 항상 새 행을 INSERT한다 —
-//  docs/backend-api-requests.md 참고)
+// 후보 타입이 EXPAND면 백엔드 applyFaqCandidate가 신규 생성이 아니라
+// 기존 FAQ를 확장하므로, 검토자가 그 사실을 미리 알 수 있게 구분해 표시한다.
 export default function MatchedFaqBadge({ matches, candidateType }) {
   const list = matches || [];
   if (candidateType !== "EXPAND" && list.length === 0) return null;
 
   const topScore = list.reduce((max, m) => Math.max(max, m.matchScore ?? 0), 0);
   const isExpand = candidateType === "EXPAND";
+  const title = list.length
+    ? list
+        .map((m) => `${m.question || `seq ${m.matchedFaqSeqNum}`} (${((m.matchScore ?? 0) * 100).toFixed(0)}%)`)
+        .join("\n")
+    : "기존 FAQ 키워드 확장 후보";
 
   return (
     <span
-      title={
-        list.length
-          ? `기존 학습데이터 seq_num: ${list.map((m) => m.matchedFaqSeqNum).join(", ")}`
-          : "기존 FAQ 키워드 확장 후보"
-      }
+      title={title}
       style={{
         fontSize: 10,
         fontWeight: 600,

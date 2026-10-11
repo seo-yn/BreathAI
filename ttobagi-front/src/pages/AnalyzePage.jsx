@@ -4,6 +4,7 @@ import { dashApi } from "../api/dashboard.js";
 import { faqApi } from "../api/faq.js";
 import MatchedFaqBadge from "../components/MatchedFaqBadge.jsx";
 import { isAccepted } from "../utils/reviewStatus.js";
+import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 
 const CLUSTER_COLORS = [
@@ -70,6 +71,10 @@ export default function AnalyzePage() {
     minSamples: "",
   });
   const toast = useToast();
+  const { user } = useAuth();
+
+  // 반영(/faq/apply)은 백엔드가 @PreAuthorize("hasRole('ADMIN')")로 막는다
+  const isAdmin = user?.role === "ADMIN";
 
   const setOption = (key) => (e) =>
     setOptions((prev) => ({
@@ -211,17 +216,21 @@ export default function AnalyzePage() {
 
       setReviewing(candidateId);
       try {
-        await faqApi.apply({
+        const res = await faqApi.apply({
           analysisId,
           clusterId: c.clusterId,
           clusterLabel: c.clusterLabel,
           candidateId: c.candidateId,
+          qType: c.qType,
           finalQuestion: c.standardQuestion,
           finalAnswer: c.answerDraft,
           keywords: c.representativeKeywords,
           isManualPatchConfirmed: false,
         });
-        toast.success("FAQ에 반영되었습니다.");
+        // 백엔드가 EXPAND 후보면 기존 FAQ를 확장하고 editType으로 알려준다
+        toast.success(res.data?.editType === "EXPAND"
+          ? "기존 FAQ를 확장했습니다."
+          : "신규 FAQ로 반영되었습니다.");
       } catch (err) {
         toast.error(err.message || "FAQ 반영에 실패했습니다.");
         return;
@@ -231,16 +240,11 @@ export default function AnalyzePage() {
     }
 
     setCandidates((prev) =>
-      prev.map((x) => x.candidateId === candidateId ? { ...x, reviewStatus: action } : x)
+      prev.map((x) => x.candidateId === candidateId
+        ? { ...x, reviewStatus: action === "ACCEPTED" ? "APPLIED" : action }
+        : x)
     );
   };
-
-  // 기존 학습데이터 매칭 정보(matchedFaqs)는 FaqCandidateListResponse엔 없고
-  // FileAnalyzeResultResponse.faqCandidates에만 있어서 candidateId로 이어붙인다.
-  const matchedFaqsById = {};
-  (analyzeResult?.faqCandidates || []).forEach((c) => {
-    if (c.candidateId != null) matchedFaqsById[c.candidateId] = c.matchedFaqs || [];
-  });
 
   return (
     <div style={S.page}>
@@ -453,7 +457,7 @@ export default function AnalyzePage() {
                 {analyzeResult ? (() => {
                   const total = analyzeResult.systemStatus?.totalLogCount || 1;
                   const correct = analyzeResult.systemStatus?.samplingStatus?.correct || 0;
-                  const unanswered = analyzeResult.systemStatus?.samplingStatus?.unanswered || 0;
+                  const unanswered = analyzeResult.systemStatus?.samplingStatus?.unanswer || 0;
                   const answeredPct = ((correct / total) * 100).toFixed(1);
                   const unansweredPct = ((unanswered / total) * 100).toFixed(1);
                   return (
@@ -514,10 +518,10 @@ export default function AnalyzePage() {
                     <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginBottom: 4 }}>{c.standardQuestion}</div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
                       <span style={{ color: "#9CA3AF" }}>매칭 {c.occurrenceCount}건</span>
-                      <MatchedFaqBadge matches={matchedFaqsById[c.candidateId]} candidateType={c.candidateType} />
+                      <MatchedFaqBadge matches={c.matchedFaqs} candidateType={c.candidateType} />
                     </div>
                   </div>
-                  {c.reviewStatus === "PENDING" ? (
+                  {c.reviewStatus === "PENDING" && isAdmin ? (
                     <div style={{ display: "flex", gap: 6 }}>
                       <button style={S.btnAccept} disabled={reviewing === c.candidateId}
                         onClick={() => handleCandidate(c.candidateId, "ACCEPTED")}>

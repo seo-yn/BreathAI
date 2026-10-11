@@ -1,4 +1,4 @@
-import { request } from "./client.js";
+import { request, requestFile } from "./client.js";
 
 function toQueryString(params) {
   const usp = new URLSearchParams();
@@ -10,11 +10,11 @@ function toQueryString(params) {
 }
 
 export const faqApi = {
-  // GET /api/v1/faq?page=0&size=10&versionId=&category=&keyword=
-  // 주의: 백엔드 FaqController는 현재 page/size만 바인딩한다. versionId/category/keyword는
-  // 명세서엔 있지만 서버에서 무시되므로, 호출부는 이 값들이 걸러진 결과를 기대하면 안 된다.
+  // GET /api/v1/faq?versionId=&page=0&size=10&category=&keyword=
+  // versionId를 주면 그 버전 시점의 FAQ, 생략하면 현재 운영 FAQ를 조회한다.
+  // category는 코드(qType)가 아니라 카테고리명 문자열이며, 서버가 마스터에서 qType으로 변환한다.
   getList: ({ page = 0, size = 10, versionId, category, keyword } = {}) =>
-    request("GET", `/api/v1/faq${toQueryString({ page, size, versionId, category, keyword })}`),
+    request("GET", `/api/v1/faq${toQueryString({ versionId, page, size, category, keyword })}`),
 
   // GET /api/v1/faq/{faqId}
   getOne: (faqId) => request("GET", `/api/v1/faq/${faqId}`),
@@ -22,22 +22,21 @@ export const faqApi = {
   // GET /api/v1/faq/recommendations/{analysisId}
   getCandidates: (analysisId) => request("GET", `/api/v1/faq/recommendations/${analysisId}`),
 
-  // POST /api/v1/faq/apply
+  // POST /api/v1/faq/apply — ADMIN 전용
   apply: (body) => request("POST", "/api/v1/faq/apply", { body }),
 
-  // PATCH /api/v1/faq/{faqId}
+  // PATCH /api/v1/faq/{faqId} — ADMIN 전용
+  // body: { standardQuestion, answer, keywords, qType?, editReason? }
   update: (faqId, body) => request("PATCH", `/api/v1/faq/${faqId}`, { body }),
 
-  // DELETE /api/v1/faq/{faqId}
+  // DELETE /api/v1/faq/{faqId} — ADMIN 전용 (비활성 처리)
   remove: (faqId) => request("DELETE", `/api/v1/faq/${faqId}`),
 
-  // GET /api/v1/faq/history/{faqId}
-  // 참고: API 명세서(Notion)엔 파라미터 없는 전역 /faq/history?editType=... 로 적혀있지만,
-  // 실제 백엔드 FaqController는 FAQ 단건 기준 /faq/history/{faqId}로 구현되어 있어 그쪽을 따름
-  getHistory: (faqId) => request("GET", `/api/v1/faq/history/${faqId}`),
-
-  // ── 아래는 API 명세서엔 있지만 백엔드에 아직 구현되지 않은 엔드포인트 ──
-  // 백엔드 배포되면 별도 수정 없이 바로 동작함 (FaqVersionsPage에서 404를 "준비 중"으로 처리)
+  // GET /api/v1/faq/history?page=0&size=10&editType=MANUAL
+  // FAQ 단건이 아니라 전역 변경 이력이다. 서버가 faqId 필터를 받지 않으므로
+  // 특정 FAQ의 이력만 뽑아낼 수는 없고, 목록의 각 행이 faqId를 들고 있다.
+  getHistory: ({ page = 0, size = 10, editType } = {}) =>
+    request("GET", `/api/v1/faq/history${toQueryString({ page, size, editType })}`),
 
   // GET /api/v1/faq/versions?page=0&size=10
   getVersions: (page = 0, size = 10) => request("GET", `/api/v1/faq/versions?page=${page}&size=${size}`),
@@ -46,13 +45,8 @@ export const faqApi = {
   getVersionDetail: (versionId) => request("GET", `/api/v1/faq/versions/${versionId}`),
 
   // GET /api/v1/faq/download?versionId=
-  downloadExcel: (versionId) => request("GET", `/api/v1/faq/download${toQueryString({ versionId })}`),
-
-  // GET /api/v1/faq/training-data?page=0&size=20&keyword=
-  // 챗봇 기존 학습데이터(질문-답변 쌍 약 2000건, bronze_counselling_info) 조회.
-  // DTO 목록에 TrainingDataListResponse만 있고 명세서 API 표엔 행 자체가 없어서,
-  // 경로/파라미터는 docs/backend-api-requests.md 에 제안한 명세를 따른다.
-  // 2000건 규모라 전체를 한 번에 받지 않고 서버 페이징 + 서버 검색을 전제로 한다.
-  getTrainingData: ({ page = 0, size = 20, keyword } = {}) =>
-    request("GET", `/api/v1/faq/training-data${toQueryString({ page, size, keyword })}`),
+  // ApiResponse JSON이 아니라 text/csv 본문으로 내려오므로 requestFile을 쓴다.
+  // versionId를 생략하면 서버가 최신 내용으로 새 버전(VersionType.DOWNLOAD)을 만들고 그걸 내려준다.
+  downloadCsv: (versionId) =>
+    requestFile("GET", `/api/v1/faq/download${toQueryString({ versionId })}`, "faq.csv"),
 };

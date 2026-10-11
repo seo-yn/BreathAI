@@ -31,7 +31,8 @@ export default function DashboardPage() {
   const sampling  = system?.samplingStatus;
   const total     = system?.totalLogCount || 1;
   const perf      = analyze?.evaluation;
-  const reasons   = analyze?.unansweredAnalysis?.byReason || [];
+  // 백엔드 JSON 키는 unansweredAnalysis가 아니라 unanswerAnalysis다 (AnalyzeResultResponse 필드명)
+  const reasons   = analyze?.unanswerAnalysis?.byReason || [];
 
   return (
     <div style={S.page}>
@@ -44,7 +45,7 @@ export default function DashboardPage() {
           { label: "총 대화 수",      value: (usage?.totalUsageCount || 0).toLocaleString(),                            sub: `전월 대비 ${usage?.increaseRate > 0 ? "+" : ""}${usage?.increaseRate || 0}%`, color: "#111827" },
           { label: "정답 (≥75%)",     value: `${sampling ? ((sampling.correct / total) * 100).toFixed(1) : 0}%`,          sub: `${(sampling?.correct || 0).toLocaleString()}건`,    color: "#1565C0" },
           { label: "오답변 (25~75%)", value: `${sampling ? ((sampling.lowQuality / total) * 100).toFixed(1) : 0}%`,       sub: `${(sampling?.lowQuality || 0).toLocaleString()}건`, color: "#7C3AED" },
-          { label: "미답변 (<25%)",   value: `${sampling ? ((sampling.unanswered / total) * 100).toFixed(1) : 0}%`,       sub: `${(sampling?.unanswered || 0).toLocaleString()}건`, color: "#EF9F27" },
+          { label: "미답변 (<25%)",   value: `${sampling ? ((sampling.unanswer / total) * 100).toFixed(1) : 0}%`,       sub: `${(sampling?.unanswer || 0).toLocaleString()}건`, color: "#EF9F27" },
         ].map((s) => (
           <div key={s.label} style={S.statCard}>
             <div style={S.statLabel}>{s.label}</div>
@@ -68,7 +69,7 @@ export default function DashboardPage() {
                 </div>
                 <div style={{ height: 6, background: "#F3F4F6", borderRadius: 3 }}>
                   <div style={{
-                    width: `${Math.min((r.count / (sampling?.unanswered || 1)) * 100, 100)}%`,
+                    width: `${Math.min((r.count / (sampling?.unanswer || 1)) * 100, 100)}%`,
                     height: "100%", borderRadius: 3, background: "#1976D2",
                   }} />
                 </div>
