@@ -13,15 +13,22 @@ export default function DashboardPage() {
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
 
-    Promise.all([
-      dashApi.getUsage(year, month),
-      dashApi.getAnalyzeResult(),
-    ]).then(([usageRes, analyzeRes]) => {
-      if (usageRes.data)   setUsage(usageRes.data);
-      if (analyzeRes.data) setAnalyze(analyzeRes.data);
-    }).catch((err) => {
-      toast.error(err.message || "대시보드 데이터를 불러오지 못했습니다.");
-    }).finally(() => setLoading(false));
+    // 두 요청을 Promise.all로 묶으면 한쪽이 실패할 때 성공한 쪽 데이터까지 버려진다.
+    // 특히 분석을 한 번도 돌리지 않은 상태에서 /analyze/result는 404(분석 결과를 찾을 수
+    // 없습니다)를 돌려주므로, 그대로 두면 사용량이 조회됐는데도 대시보드가 통째로 비고
+    // 오류 토스트만 뜬다. 그래서 각각 따로 처리한다.
+    const usageReq = dashApi.getUsage(year, month)
+      .then((res) => { if (res.data) setUsage(res.data); })
+      .catch((err) => toast.error(err.message || "사용량을 불러오지 못했습니다."));
+
+    const analyzeReq = dashApi.getAnalyzeResult()
+      .then((res) => { if (res.data) setAnalyze(res.data); })
+      .catch((err) => {
+        // 분석 이력이 아직 없는 건 오류가 아니라 정상적인 초기 상태다
+        if (err.status !== 404) toast.error(err.message || "분석 결과를 불러오지 못했습니다.");
+      });
+
+    Promise.all([usageReq, analyzeReq]).finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -38,6 +45,12 @@ export default function DashboardPage() {
     <div style={S.page}>
       <div style={S.pageTitle}>대시보드</div>
       <div style={S.pageSub}>또타24 챗봇 응답 현황을 확인합니다.</div>
+
+      {!analyze && (
+        <div style={S.notice}>
+          아직 분석 결과가 없습니다. <strong>신규 데이터 분석</strong>에서 로그를 업로드하면 이곳에 응답 현황이 표시됩니다.
+        </div>
+      )}
 
       {/* 통계 카드 */}
       <div style={S.statGrid}>
@@ -112,4 +125,5 @@ const S = {
   card:       { background: "#fff", borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,.08)", border: "1px solid rgba(0,0,0,.06)" },
   cardHeader: { padding: "14px 20px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between" },
   cardTitle:  { fontSize: 14, fontWeight: 600, color: "#111827" },
+  notice:     { background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#1E40AF", marginBottom: 20 },
 };

@@ -42,11 +42,12 @@ export default function TrainingDataPage() {
         setState("ready");
       })
       .catch((err) => {
-        // GlobalExceptionHandler가 NoResourceFoundException을 처리하게 되면서(PR #34)
-        // 미구현 라우트는 404로 내려온다. 그래서 "아직 없는 기능"과 "진짜 서버 오류"를
-        // 상태 코드로 구분할 수 있다.
+        // 아직 엔드포인트가 없을 때 404가 아니라 400이 온다. /api/v1/faq/{faqId}에
+        // 먼저 걸려서 "training-data"를 Long으로 변환하다 실패하기 때문이다
+        // (MethodArgumentTypeMismatchException -> 400 "요청 값의 형식이 올바르지 않습니다").
+        // 그래서 400과 404를 모두 "준비 중"으로 보고, 나머지만 실제 오류로 처리한다.
         setErrorMessage(err.message || "");
-        setState(err.status === 404 ? "not-implemented" : "error");
+        setState(err.status === 404 || err.status === 400 ? "not-implemented" : "error");
       });
   }, [applyResponse]);
 
