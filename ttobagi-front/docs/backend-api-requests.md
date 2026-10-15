@@ -1,6 +1,6 @@
 # 백엔드 API 추가/수정 요청서
 
-최초 작성: 2026-10-10 · 갱신: 2026-10-11 (develop `f32afdc` 기준)
+최초 작성: 2026-10-10 · 갱신: 2026-10-15 (develop `f32afdc` 기준 — 10/10 이후 변경 없음)
 작성: 프론트엔드 · 대상: `ttobagi-server`, 일부는 AI 서버(FastAPI) 동반 수정 필요
 
 프론트엔드 신규 요구사항 4건에 대한 요청서입니다. **10/4~10/10 PR 8건이 머지되면서
@@ -32,10 +32,30 @@
 
 대상은 또타24 챗봇이 현재 학습하고 있는 **질문-답변 쌍 약 2000건**(`bronze_counselling_info`)입니다.
 `TrainingDataListResponse`가 DTO 목록에는 있는데 API 명세서 표에는 행 자체가 없고, 백엔드에도
-엔드포인트가 없습니다. PR #37(Bronze 원본 적재)이 적재는 다루지만 조회 API는 아닙니다.
+엔드포인트가 없습니다. PR #37(Bronze 원본 적재)이 적재와 스키마는 올려줬지만 조회 API는 아닙니다.
 관련 이슈로 #28(기존 FAQ 적재 자동화)이 열려 있습니다.
 
 2000건 규모라 **서버 페이징과 서버 검색이 필요합니다.**
+
+### 참고: 테이블은 이미 있습니다 (PR #37)
+
+`db/schema/bronze_faq_sources.sql`에 스키마가 정의돼 있어서, 아래 컬럼을 그대로 쓰시면 됩니다.
+
+| Bronze 컬럼 | 응답 필드 | 비고 |
+|---|---|---|
+| `seq_num` | `seqNum` | 행 식별자 |
+| `ci_question` | `standardQuestion` | 대표 질문 문구 |
+| `ci_answer0` | `answer` | 기본 답변 본문 (LONGTEXT) |
+| `q_type` | `qType` | 카테고리 코드 |
+| `bronze_cate_info.q_disp_name` | `category` | `q_type`으로 조인해 표시명 해석 |
+| `qa_cnt` | `qaCnt` | 누적 질의 수 |
+
+**주의: PK가 `(_ingest_batch_id, seq_num)` 복합키입니다.** 같은 `seq_num`이 적재 배치마다
+중복으로 존재하므로, **최신 배치 기준으로 조회**하지 않으면 같은 질문이 여러 번 나옵니다.
+`bronze_ingest_batch`에서 최신 배치를 고르는 조건이 필요합니다.
+
+`state` 컬럼으로 비활성 항목을 제외할지는 서연님 판단에 맡기겠습니다
+(스키마 주석에 "상태값 (확인 필요)"로 적혀 있습니다).
 
 ### `GET /api/v1/faq/training-data`
 
@@ -106,6 +126,29 @@ HDBSCAN은 k-means처럼 클러스터 개수를 직접 지정할 수 없습니�
 2. `WebClientUtil.sendPipeline()` — AI 서버 `/pipeline` 호출 바디에 전달
 3. `AnalysisJob` — 어떤 파라미터로 돌린 분석인지 재현 가능하게 컬럼 추가 (권장)
 4. AI 서버 — `/pipeline`에서 두 값을 받아 HDBSCAN에 넘기고, 미전달 시 기존 기본값 유지
+
+### AI팀 확인 요청 (2026-10-15 기준)
+
+`feat/evaluation/pipeline-integration/AI` 브랜치의 `services/clustering.py`를 봤는데,
+클러스터링 파라미터가 **모듈 상수로 고정**돼 있고 `cluster()` 함수가 인자를 받지 않습니다.
+
+```python
+HDBSCAN_MIN_CLUSTER_SIZE = 5
+HDBSCAN_MIN_SAMPLES = 2
+UMAP_NEIGHBORS = 15
+
+def cluster(emb_clu: np.ndarray) -> np.ndarray:   # 인자 없음
+```
+
+그래서 백엔드가 값을 전달해도 받을 곳이 없습니다. `cluster(emb_clu, min_cluster_size=None,
+min_samples=None)` 형태로 인자화하고 `run_pipeline`에서 넘겨주시면, 백엔드→AI 전달만
+연결하면 끝납니다. 미전달 시 지금 상수를 기본값으로 쓰면 기존 동작은 그대로 유지됩니다.
+
+### 더 앞선 선행 조건: `/pipeline` 엔드포인트
+
+`run_pipeline.py`가 argparse CLI(`--full`)로만 실행되고, 저장소 어디에도 FastAPI 앱이
+없습니다. Spring `WebClientUtil`이 `POST /pipeline`을 호출하는데 그걸 받을 서버가 없어서,
+**업로드 → 분석 흐름이 end-to-end로 동작하지 않습니다.** 이 엔드포인트가 먼저 필요합니다.
 
 프론트 화면에는 이 항목에 "백엔드 반영 대기" 뱃지를 달아뒀습니다. 서버가 받기 시작하면
 그 뱃지만 떼면 됩니다.
