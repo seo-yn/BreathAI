@@ -3,9 +3,11 @@ package com.breathAI.ttobagi_server.domain.dashboard.controller;
 import com.breathAI.ttobagi_server.domain.dashboard.dto.*;
 import com.breathAI.ttobagi_server.domain.dashboard.service.DashboardService;
 import com.breathAI.ttobagi_server.global.dto.ApiResponse;
+import com.breathAI.ttobagi_server.global.security.AiCallbackTokenVerifier;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -24,6 +26,7 @@ import java.time.LocalDate;
 public class DashboardController {
 
     private final DashboardService dashboardService;
+    private final AiCallbackTokenVerifier aiCallbackTokenVerifier;
 
     // 월 단위 챗봇 사용량 조회
     @GetMapping("/usage")
@@ -95,11 +98,13 @@ public class DashboardController {
     }
 
     // AI 서버 분석 콜백 수신
-    // 서버 간 호출이라 인증이 없으며 배포 전 별도 인증이 필요하다
+    // 사용자 로그인이 아닌 AI 서버와 공유한 콜백 토큰으로 인증한다
     @PostMapping("/analyze/callback/{analysisId}")
     public ResponseEntity<ApiResponse<Void>> receiveAnalysisCallback(
             @PathVariable Long analysisId,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
             @RequestBody AnalysisCallbackRequest request) {
+        aiCallbackTokenVerifier.verify(authorization);
         dashboardService.handleAnalysisCallback(analysisId, request);
         return ResponseEntity.ok(ApiResponse.success(null));
     }

@@ -502,6 +502,15 @@ public class DashboardService {
         AnalysisJob analysisJob = analysisJobRepository.findById(analysisId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ANALYSIS_NOT_FOUND));
 
+        // 이미 끝난 분석에 온 콜백은 다시 저장하지 않는다
+        // AI 서버가 재전송으로 판단하지 않도록 오류 없이 정상 응답한다
+        if (analysisJob.getStatus() == AnalysisJob.Status.COMPLETED
+                || analysisJob.getStatus() == AnalysisJob.Status.FAIL) {
+            log.warn("이미 종료된 분석의 콜백 무시: analysisId={}, 현재 상태={}, 수신 상태={}",
+                    analysisId, analysisJob.getStatus(), request.getStatus());
+            return;
+        }
+
         // 중간 상태 콜백 (PREPROCESSING, ANALYZING)
         if ("PREPROCESSING".equals(request.getStatus())) {
             analysisJob.startPreprocessing();
