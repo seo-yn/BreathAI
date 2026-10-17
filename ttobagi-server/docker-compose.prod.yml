@@ -32,7 +32,11 @@ services:
       # 같은 compose 안의 DB로 접속한다
       TTOBAGI_DB_URL: jdbc:mariadb://mariadb:3306/ttobagi_db
     ports:
-      - "8080:8080"
+      # 외부 요청은 nginx(443)가 받아 넘기므로 서버 안에서만 연다 (AI 서버 SSH 터널 콜백도 여기로 온다)
+      - "127.0.0.1:8080:8080"
+    extra_hosts:
+      # 서버의 SSH 터널 포트(AI 서버 18000)에 닿기 위한 주소 (TTOBAGI_AI_SERVER=http://host.docker.internal:18000)
+      - "host.docker.internal:host-gateway"
     depends_on:
       mariadb:
         condition: service_healthy
