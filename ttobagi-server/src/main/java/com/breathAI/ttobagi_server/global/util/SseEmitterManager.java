@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.global.util;
 
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -21,7 +22,22 @@ public class SseEmitterManager {
         // 그 사이 다른 연결로 교체됐을 수 있으므로 자기 자신일 때만 제거한다
         emitter.onCompletion(() -> emitters.remove(analysisId, emitter));
         emitter.onTimeout(() -> emitters.remove(analysisId, emitter));
+        emitter.onError(e -> emitters.remove(analysisId, emitter));
         return emitter;
+    }
+
+    // 프록시가 조용한 연결을 끊지 않도록 20초마다 빈 신호(SSE 주석)를 보낸다
+    // nginx 기본 대기 시간(proxy_read_timeout 60초)보다 짧게 잡았다
+    @Scheduled(fixedRate = 20_000)
+    public void sendHeartbeat() {
+        emitters.forEach((analysisId, emitter) -> {
+            try {
+                emitter.send(SseEmitter.event().comment("heartbeat"));
+            } catch (Exception e) {
+                // 끊긴 연결은 목록에서 제거한다
+                emitters.remove(analysisId, emitter);
+            }
+        });
     }
 
     // 클라이언트에 상태 변경 전송
