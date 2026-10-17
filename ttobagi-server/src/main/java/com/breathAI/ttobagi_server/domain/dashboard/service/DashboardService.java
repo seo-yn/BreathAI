@@ -46,6 +46,7 @@ public class DashboardService {
     private final UsageStatRepository usageStatRepository;
     private final UserRepository userRepository;
     private final WebClientUtil webClientUtil;
+    private final AnalysisUploadReader analysisUploadReader;
     private final ClusterRepository clusterRepository;
     private final ClusterLogMapRepository clusterLogMapRepository;
     private final FaqCandidateRepository faqCandidateRepository;
@@ -337,6 +338,8 @@ public class DashboardService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 
+        var pipelineFile = analysisUploadReader.read(file);
+
         // 요청이 끝나면 업로드 임시 파일이 지워질 수 있어, AI 전송용 내용을 여기서 미리 읽는다
         byte[] fileBytes;
         try {
@@ -403,8 +406,8 @@ public class DashboardService {
                 webClientUtil.sendPipeline(
                         uploadId,
                         analysisId,
-                        fileBytes,
-                        originalFileName,
+                        pipelineFile.content(),
+                        pipelineFile.filename(),
                         isMaskingEnabled,
                         isTranslationEnabled,
                         periodStartDate != null ? periodStartDate : "",
