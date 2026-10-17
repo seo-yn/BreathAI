@@ -1,0 +1,42 @@
+# 배포용: BE와 MariaDB를 함께 띄운다
+# 같은 폴더의 .env 값을 사용한다 (.env.example 참고)
+#   실행: docker compose -f docker-compose.prod.yml up -d --build
+#   종료: docker compose -f docker-compose.prod.yml down      (데이터 유지)
+services:
+  mariadb:
+    # Flyway가 검증한 범위(11.7까지) 안의 LTS 버전
+    image: mariadb:11.4
+    environment:
+      MARIADB_DATABASE: ttobagi_db
+      MARIADB_USER: ${TTOBAGI_DB_USERNAME}
+      MARIADB_PASSWORD: ${TTOBAGI_DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${TTOBAGI_DB_ROOT_PASSWORD}
+    command: --character-set-server=utf8mb4
+    ports:
+      # 서버 안에서만 접속한다 (덤프 이관, AI 서버 SSH 터널용)
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - ttobagi-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    build: .
+    env_file: .env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      # 같은 compose 안의 DB로 접속한다
+      TTOBAGI_DB_URL: jdbc:mariadb://mariadb:3306/ttobagi_db
+    ports:
+      - "8080:8080"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  ttobagi-db-data:

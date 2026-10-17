@@ -71,6 +71,7 @@ public class SecurityConfig {
                 .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers("/api/v1/dashboard/analyze/callback/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/faq/**").hasAnyRole("USER", "ADMIN")
                 .requestMatchers(HttpMethod.PATCH, "/api/v1/faq/**").hasRole("ADMIN")

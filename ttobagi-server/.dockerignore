@@ -1,4 +1,5 @@
-ttobagi-server/
 .gradle/
 .idea/
 build/
+.env
+.env.*
