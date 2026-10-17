@@ -11,6 +11,8 @@ public enum ErrorCode {
 
     // 400 BAD REQUEST: 잘못된 요청
     INVALID_INPUT_VALUE(400, "G-001", "입력값이 올바르지 않습니다."),
+    INVALID_UPLOAD_FILE(400, "D-004", "비어 있거나 읽을 수 없는 파일입니다."),
+    UNSUPPORTED_UPLOAD_FORMAT(400, "D-005", "CSV 또는 XLSX 파일만 업로드할 수 있습니다."),
     ALREADY_USED_TOKEN(400, "G-002", "이미 사용되었거나 만료된 토큰입니다."),
     INVALID_RESET_CODE(400, "A-008", "인증 코드가 일치하지 않습니다."),
     EXPIRED_RESET_CODE(400, "A-009", "인증 코드가 만료되었습니다. 코드를 다시 발급받아 주세요."),

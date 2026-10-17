@@ -228,3 +228,9 @@ Bronze 원본 테이블 생성·적재 및 외래키 변경은
 [FAQ 원본 적재 안내](docs/faq-source-ingestion.md)를 참고하세요.
 로컬 DB 반영·검증 결과와 후속 개발 항목은
 [FAQ 개발 상태](docs/faq-development-status.md)에 정리합니다.
+
+## 분석 파일 업로드
+
+분석 업로드 API는 CSV와 XLSX를 지원합니다. XLSX는 첫 번째 시트를 CSV로
+변환해 AI 서버에 전달하며 원본 파일명은 업로드 이력에 유지합니다.
+파일 구조와 오류 응답은 [분석 업로드 안내](docs/analysis-upload-formats.md)를 참고하세요.
