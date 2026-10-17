@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -100,6 +101,16 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(status)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.error(message, status));
+    }
+
+    // @PreAuthorize 권한 부족 처리
+    // 아래의 Exception 처리에 잡혀 500이 되지 않도록 403으로 응답한다
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
+        log.warn("권한 부족: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ApiResponse.error("ADMIN 계정만 접근 가능합니다.", 403));
     }
 
     // SSE 연결이 제한 시간에 도달해 끝나는 것은 정상 동작이므로 오류로 기록하지 않는다
