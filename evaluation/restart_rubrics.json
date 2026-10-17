@@ -1,0 +1,18 @@
+{
+  "accuracy": {
+    "criteria": "Factual correctness of the Korean answer to the user's question, judged against the provided reference and source FAQ. Ignore politeness and rude wording. Do not reward mere word overlap. Unsupported phone numbers, procedures or policies are errors.",
+    "scores": ["Mostly wrong, contradicts the source, or does not answer the question.", "Contains a major factual error or unsupported central instruction.", "Partially correct but contains notable unsupported details or inaccuracies.", "Correct central answer with only a minor factual imprecision.", "All substantive claims answer the question correctly and are supported by the source."]
+  },
+  "politeness": {
+    "criteria": "Politeness and respectful Korean service tone only. Ignore whether the facts, telephone numbers or procedures are correct. An incorrect answer written respectfully can receive 5; a correct answer containing insults should receive 1. Korean is the expected language.",
+    "scores": ["Insults, hostility or personal attacks.", "Clearly rude or dismissive language.", "Neutral but awkward or inconsistently respectful tone.", "Consistently polite Korean with minor tone issues.", "Respectful, professional and considerate Korean service tone throughout."]
+  },
+  "actionability": {
+    "criteria": "Whether the answer gives correct and usable next steps for this specific question. The action must be supported by the source. For an informational question, a clear explanation that enables understanding or an informed decision is sufficient; do not invent a need for a phone call.",
+    "scores": ["No useful next step or usable explanation; or directs the user to a wrong action.", "Vague or largely unsupported instructions that the user cannot reliably use.", "Partly usable guidance but a substantial operational detail is missing.", "Correct and directly usable guidance with a minor omission.", "Clear, correct and sufficiently specific guidance or explanation for the question."]
+  },
+  "essential": {
+    "criteria": "Coverage of information essential to this question, using the reference as a guide. Do not require unrelated facts from the long source FAQ. Unfilled placeholders, copied prompts and irrelevant repetition reduce the score. Assess information completeness rather than politeness.",
+    "scores": ["Almost all essential information is missing or replaced by irrelevant text.", "A major necessary fact, contact method or condition is missing.", "Some essential information is provided but important details are missing.", "Essential information is mostly covered with a minor omission or excess.", "All question-relevant essential information is covered without distracting excess."]
+  }
+}

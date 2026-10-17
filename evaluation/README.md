@@ -1,5 +1,51 @@
 # BreathAI 성능 평가 준비
 
+## 2026-10-17: 테스트 코드 인계
+
+최신 실행 경로와 결과 저장 위치는 [RESTART_HANDOFF.md](RESTART_HANDOFF.md)를
+참고한다. 아래 v2/v3는 실패 원인을 보존한 과거 진단 경로이며 권장 Judge가 아니다.
+두 후속 로컬 Judge도 대조 검증에 실패했다. 최신 표는 Codex의 직접 평가로,
+검증된 독립 Judge 또는 사람 평가 결과로 해석하지 않는다.
+
+이번 추가 코드는 `evaluation/`과 `tests/`에 한정된다. 최초 체크아웃 커밋
+`24ece94` 이후 `services/` 운영 파이프라인의 변경은 없다.
+
+## 2026-10-12: 항목별 평가 v3
+
+현재 후속 경로는 [CHECKLIST_V3.md](CHECKLIST_V3.md)를 따른다. 점수를 먼저
+생성하지 않고 사실성·공손함·관련성·실행 안내·필수정보를 검사하며 근거 부족을
+unknown으로 구분한다. 결정적 연산 설정과 캐시 없는 대조 시험을 적용했다.
+공손함에는 모든 판정값을 동등하게 허용하는 출력 문법을 적용한다.
+
+익명 사람 평가 양식과 질문 검토 초안은 `results/checklist-v3-001`에 있다.
+후속 자동 채점 진단은 `results/checklist-v3-004`에 저장한다. 사람 라벨과의
+일치도가 검증되기 전까지 자동 점수를 최종 성능 우열로 해석하지 않는다.
+진단 모드에서는 대조군 실패 후에도 나머지 대조군을 수집하지만 전체 재채점은
+차단한다. 모델·프롬프트가 다른 기록을 섞어 재개하지 않는다.
+
+```powershell
+python -m evaluation.run_checklist_judge --output evaluation/results/checklist-v3-004 --diagnostic-controls --resume-controls --controls-only --budget-seconds 1200
+python -m evaluation.summarize_checklist evaluation/results/checklist-v3-004
+```
+
+## 2026-10-12: 안정화 채점 경로 v2
+
+이전 집계 도구와 별도로 `rejudge_saved.py`가 고정된 생성 답변을 실제 로컬
+모델로 재채점한다. NFKC·공백 정규화와 입력 해시 캐시로 동일 입력의 점수를
+재사용하며, 근거 인용·수치·자리표시자 검사와 대조군 검증을 적용한다.
+자세한 기준·적용 범위·제한은 [JUDGE_V2.md](JUDGE_V2.md)에 있다.
+
+```powershell
+python -m unittest tests.test_stable_judge tests.test_evaluation
+python -m evaluation.rejudge_saved --controls-only
+python -m evaluation.rejudge_saved
+```
+
+출력은 `evaluation/results/rejudge-v2-001`에 저장한다. 원점수와 규칙으로
+조정한 점수를 분리한다. 기존 질문·답변·검색 임계값은 바꾸지 않는다.
+사람 정답 라벨이 없는 자동 예비 평가이며 운영 Refine 자체 채점기는 별도다.
+아래는 기존 집계 명세와 2026-10-11 당시의 준비 기록이다.
+
 현재 제공하는 것은 **저장된 평가 결과의 검증·집계 도구**이다. 생성 모델,
 Cross-Encoder, Judge를 실행하는 도구나 전체 파이프라인 성능 측정 완료본은 아니다.
 외부 패키지 없이 Python 표준 라이브러리로 실행한다. 운영 DB에는 접근하지 않는다.
