@@ -20,6 +20,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.multipart.MultipartFile;
 import org.apache.commons.codec.digest.DigestUtils;
@@ -321,7 +323,8 @@ public class DashboardService {
                 .build();
         }
 
-    // 파일 업로드 후 AI 분석 파이프라인 시작, 동일 해시 파일은 기존 결과 반환
+    // 파일 업로드 후 AI 분석 파이프라인 시작
+    // 동일 해시 파일은 기존 결과를 반환하고, 이전 분석이 실패했으면 같은 업로드 기록으로 다시 분석한다
     @Transactional
     public NewAnalyzeResponse uploadAndStartAnalysis(
             MultipartFile file,
@@ -330,25 +333,29 @@ public class DashboardService {
             String periodEndDate,
             boolean isMaskingEnabled,
             boolean isTranslationEnabled) {
-    
+
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
-    
-        String fileHash;
+
+        // 요청이 끝나면 업로드 임시 파일이 지워질 수 있어, AI 전송용 내용을 여기서 미리 읽는다
+        byte[] fileBytes;
         try {
-            fileHash = DigestUtils.sha256Hex(file.getInputStream());
+            fileBytes = file.getBytes();
         } catch (IOException e) {
             throw new CustomException(ErrorCode.FILE_READ_ERROR);
         }
-    
+        String fileHash = DigestUtils.sha256Hex(fileBytes);
+
         LocalDate parsedStartDate = periodStartDate != null ? LocalDate.parse(periodStartDate) : null;
         LocalDate parsedEndDate = periodEndDate != null ? LocalDate.parse(periodEndDate) : null;
-    
+        String originalFileName = file.getOriginalFilename();
+
+        UploadFile uploadFile;
         Optional<UploadFile> existingUpload = uploadFileRepository.findByFileHash(fileHash);
         if (existingUpload.isPresent()) {
                 Optional<AnalysisJob> existingJob = analysisJobRepository
                         .findFirstByUploadFileOrderByCreatedAtDesc(existingUpload.get());
-                if (existingJob.isPresent()) {
+                if (existingJob.isPresent() && existingJob.get().getStatus() != AnalysisJob.Status.FAIL) {
                 AnalysisJob job = existingJob.get();
                 log.info("중복 파일 감지 - 기존 분석 결과 반환: analysisId={}", job.getAnalysisId());
                 return NewAnalyzeResponse.builder()
@@ -360,23 +367,24 @@ public class DashboardService {
                         .submittedAt(job.getCreatedAt())
                         .build();
                 }
+                // 해시로 업로드 기록을 하나만 찾으므로, 새로 만들지 않고 기존 기록을 다시 쓴다
+                uploadFile = existingUpload.get();
+                log.info("이전 분석이 없거나 실패한 파일 재분석: uploadId={}", uploadFile.getUploadId());
+        } else {
+            String newUploadId = UUID.randomUUID().toString();
+            uploadFile = UploadFile.builder()
+                    .uploadId(newUploadId)
+                    .uploadedBy(user)
+                    .originalFileName(originalFileName)
+                    .fileName(newUploadId + "_" + originalFileName)
+                    .filePath("")
+                    .fileSize(file.getSize())
+                    .fileHash(fileHash)
+                    .build();
+            uploadFileRepository.save(uploadFile);
         }
+        String uploadId = uploadFile.getUploadId();
 
-        String uploadId = UUID.randomUUID().toString();
-        String originalFileName = file.getOriginalFilename();
-        String uniqueFileName = uploadId + "_" + originalFileName;
-    
-        UploadFile uploadFile = UploadFile.builder()
-                .uploadId(uploadId)
-                .uploadedBy(user)
-                .originalFileName(originalFileName)
-                .fileName(uniqueFileName)
-                .filePath("")
-                .fileSize(file.getSize())
-                .fileHash(fileHash)
-                .build();
-        uploadFileRepository.save(uploadFile);
-    
         AnalysisJob analysisJob = AnalysisJob.builder()
                 .uploadFile(uploadFile)
                 .fileName(originalFileName)
@@ -386,26 +394,47 @@ public class DashboardService {
                 .periodEndDate(parsedEndDate)
                 .build();
         analysisJobRepository.save(analysisJob);
-    
-        webClientUtil.sendPipeline(
-                uploadId,
-                analysisJob.getAnalysisId(),
-                file,
-                isMaskingEnabled,
-                isTranslationEnabled,
-                periodStartDate != null ? periodStartDate : "",
-                periodEndDate != null ? periodEndDate : "");
-    
-        log.info("파일 업로드 및 분석 시작: analysisId={}, uploadId={}", analysisJob.getAnalysisId(), uploadId);
-    
+        Long analysisId = analysisJob.getAnalysisId();
+
+        // 분석 기록이 커밋된 뒤에 요청해야 실패 처리와 AI 콜백이 기록을 찾을 수 있다
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                webClientUtil.sendPipeline(
+                        uploadId,
+                        analysisId,
+                        fileBytes,
+                        originalFileName,
+                        isMaskingEnabled,
+                        isTranslationEnabled,
+                        periodStartDate != null ? periodStartDate : "",
+                        periodEndDate != null ? periodEndDate : "",
+                        () -> markPipelineRequestFailed(analysisId));
+            }
+        });
+
+        log.info("파일 업로드 및 분석 시작: analysisId={}, uploadId={}", analysisId, uploadId);
+
         return NewAnalyzeResponse.builder()
-                .analysisId(analysisJob.getAnalysisId())
+                .analysisId(analysisId)
                 .uploadId(uploadId)
                 .fileName(originalFileName)
                 .status(analysisJob.getStatus().name())
                 .message("파일 업로드 및 AI 분석 파이프라인을 시작합니다.")
                 .submittedAt(analysisJob.getCreatedAt())
                 .build();
+    }
+
+    // AI 서버에 분석 요청을 보내지 못했을 때 대기 중인 분석을 실패로 바꾸고 알린다
+    // 요청 스레드 밖에서 실행되므로 저장소 메서드 단위 트랜잭션으로 처리한다
+    private void markPipelineRequestFailed(Long analysisId) {
+        analysisJobRepository.findById(analysisId).ifPresent(job -> {
+            // 그 사이 AI 콜백으로 진행된 분석은 건드리지 않는다
+            if (job.getStatus() != AnalysisJob.Status.PENDING) return;
+            job.fail("AI 서버에 분석을 요청하지 못했습니다.");
+            analysisJobRepository.save(job);
+            sseEmitterManager.send(analysisId, "FAIL", "분석에 실패했습니다.");
+        });
     }
 
     // 분석 진행 상태 조회, SSE 끊김 시 폴링 용도
