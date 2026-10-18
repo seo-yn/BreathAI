@@ -60,6 +60,9 @@ const FALLBACK_MESSAGE = {
   401: "로그인이 필요합니다.",
   403: "권한이 없습니다.",
   404: "요청한 정보를 찾을 수 없습니다.",
+  405: "지원하지 않는 요청 방식입니다.",
+  409: "이미 처리된 요청입니다.",
+  415: "지원하지 않는 형식입니다.",
   413: "파일이 너무 큽니다.",
   500: "서버 내부 오류가 발생했습니다.",
   502: "서버에 연결할 수 없습니다.",
@@ -227,6 +230,17 @@ export async function requestFile(method, path, fallbackFileName = "download") {
     blob: await res.blob(),
     fileName: parseFileName(res.headers.get("Content-Disposition"), fallbackFileName),
   };
+}
+
+/**
+ * 입력값 검증 실패(400)일 때 백엔드가 data에 필드별 메시지를 담아 보낸다.
+ * 예: { "password": "비밀번호 형식이 올바르지 않습니다." }
+ * 화면에서 한 줄로 이어 붙여 보여 줄 때 쓴다. 해당 형태가 아니면 빈 문자열.
+ */
+export function fieldErrors(err) {
+  const data = err?.data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return "";
+  return Object.values(data).filter((v) => typeof v === "string").join(" · ");
 }
 
 // 받은 파일을 다운로드시킨다. a[download]를 쓰면 Content-Disposition의 파일명을 유지할 수 있다.

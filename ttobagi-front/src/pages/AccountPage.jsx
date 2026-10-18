@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authApi } from "../api/auth.js";
+import { fieldErrors } from "../api/client.js";
+
+// 백엔드가 400 검증 실패 시 data에 필드별 사유를 담아 보낸다. 있으면 함께 보여 준다.
+function withFields(err, fallback) {
+  const base = err?.message || fallback;
+  const fields = fieldErrors(err);
+  return fields ? `${base} (${fields})` : base;
+}
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 
@@ -41,7 +49,7 @@ export default function AccountPage() {
       toast.success("비밀번호가 변경되었습니다.");
       setPw({ current: "", next: "", confirm: "" });
     } catch (err) {
-      setPwError(err.message || "비밀번호 변경에 실패했습니다.");
+      setPwError(withFields(err, "비밀번호 변경에 실패했습니다."));
     } finally {
       setLoading(false);
     }

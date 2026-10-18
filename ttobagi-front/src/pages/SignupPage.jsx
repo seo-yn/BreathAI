@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { authApi } from "../api/auth.js";
+import { fieldErrors } from "../api/client.js";
+
+// 백엔드가 400 검증 실패 시 data에 필드별 사유를 담아 보낸다. 있으면 함께 보여 준다.
+function withFields(err, fallback) {
+  const base = err?.message || fallback;
+  const fields = fieldErrors(err);
+  return fields ? `${base} (${fields})` : base;
+}
 import { useToast } from "../hooks/useToast.js";
 
 const PW_PATTERN = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[a-z\d@$!%*?&]{6,20}$/;
@@ -29,7 +37,7 @@ export default function SignupPage() {
       toast.success("가입 완료! 로그인 해주세요.");
       navigate("/login", { replace: true });
     } catch (err) {
-      setError(err.message || "회원가입에 실패했습니다.");
+      setError(withFields(err, "회원가입에 실패했습니다."));
     } finally {
       setLoading(false);
     }

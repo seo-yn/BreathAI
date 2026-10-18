@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { authApi } from "../api/auth.js";
+import { fieldErrors } from "../api/client.js";
+
+// 백엔드가 400 검증 실패 시 data에 필드별 사유를 담아 보낸다. 있으면 함께 보여 준다.
+function withFields(err, fallback) {
+  const base = err?.message || fallback;
+  const fields = fieldErrors(err);
+  return fields ? `${base} (${fields})` : base;
+}
 import { useToast } from "../hooks/useToast.js";
 
 // 새 비밀번호 규칙: 영문 소문자 + 숫자 + 특수문자(@$!%*?&) 포함 6~20자.
@@ -10,13 +18,13 @@ const PW_PATTERN = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[a-z\d@$!%*?&]{6,20}$/;
 const CODE_LENGTH = 6;
 
 // 코드를 다시 발급받아야 하는 상황인지 판단한다.
-// 429는 입력 횟수 초과, 400 중에서는 만료 / 이미 사용된 코드가 재발급 대상이다.
-// 백엔드가 에러 코드를 따로 주지 않아 상태 코드 + 메시지로 구분한다.
+// 백엔드가 코드 불일치·만료·형식 오류를 모두 400으로 묶어서 내려주므로
+// 상태 코드만으로는 "다시 입력하면 되는 경우"와 "재발급이 필요한 경우"를 가를 수 없다.
+// API 명세 변경 문서에 "message 문구로 분기하지 말고 HTTP 상태 코드를 본다"고 돼 있어
+// 문자열 매칭은 쓰지 않는다. 확실히 재발급이 필요한 429만 강조하고,
+// 400은 서버 메시지를 그대로 보여 주되 재발급 안내는 항상 노출한다.
 function needsNewCode(err) {
-  if (err?.status === 429) return true;
-  if (err?.status !== 400) return false;
-  const message = err.message || "";
-  return message.includes("만료") || message.includes("이미 사용");
+  return err?.status === 429;
 }
 
 export default function ResetPage() {
@@ -43,7 +51,7 @@ export default function ResetPage() {
       setStep("code");
       toast.success("인증 코드를 발송했습니다. 메일함을 확인해주세요.");
     } catch (err) {
-      setError(err.message || "인증 코드 발송에 실패했습니다.");
+      setError(withFields(err, "인증 코드 발송에 실패했습니다."));
     } finally {
       setLoading(false);
     }
@@ -74,7 +82,7 @@ export default function ResetPage() {
       navigate("/login", { replace: true });
     } catch (err) {
       // 백엔드 메시지를 그대로 보여주고, 재발급이 필요한 경우만 안내를 덧붙인다
-      setError(err.message || "비밀번호 재설정에 실패했습니다.");
+      setError(withFields(err, "비밀번호 재설정에 실패했습니다."));
       setExpired(needsNewCode(err));
     } finally {
       setLoading(false);
@@ -149,11 +157,11 @@ export default function ResetPage() {
               {error && (
                 <div style={S.errorBox}>
                   <p style={{ margin: 0 }}>{error}</p>
-                  {expired && (
-                    <p style={{ margin: "6px 0 0", color: "#92400E" }}>
-                      코드를 다시 받아야 합니다. 새로 발급하면 이전 코드는 사용할 수 없습니다.
-                    </p>
-                  )}
+                  <p style={{ margin: "6px 0 0", color: "#92400E" }}>
+                    {expired
+                      ? "코드를 다시 받아야 합니다. 새로 발급하면 이전 코드는 사용할 수 없습니다."
+                      : "코드가 만료됐거나 이미 사용한 코드라면 아래에서 다시 받으실 수 있습니다."}
+                  </p>
                 </div>
               )}
 
