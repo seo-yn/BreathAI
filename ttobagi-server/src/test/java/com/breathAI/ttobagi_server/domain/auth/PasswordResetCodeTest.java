@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,8 +32,9 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 
 // 비밀번호 재설정 6자리 인증 코드 검증
-// 실제 DB에 연결해 실행하지만 테스트가 끝나면 모두 롤백되고, 메일은 실제로 보내지 않는다
+// 테스트 전용 DB(Testcontainers)에서 실행하고 테스트가 끝나면 모두 롤백되고, 메일은 실제로 보내지 않는다
 @SpringBootTest
+@ActiveProfiles("test")
 @Transactional
 class PasswordResetCodeTest {
 

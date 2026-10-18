@@ -4,6 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
@@ -18,6 +19,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 // 잘못된 요청이 500이 아니라 원인에 맞는 상태 코드로 응답되는지 검증
 // 모두 컨트롤러에 들어가기 전에 걸러지는 요청이라 DB에는 쓰지 않는다
 @SpringBootTest
+@ActiveProfiles("test")
 @AutoConfigureMockMvc
 @WithMockUser(roles = "ADMIN")
 class GlobalExceptionHandlerTest {
