@@ -155,7 +155,26 @@ min_samples=None)` 형태로 인자화하고 `run_pipeline`에서 넘겨주시�
 
 ---
 
-## ③ ApiResponse에 에러 식별 코드 노출 (권장)
+## ③ CORS 허용 오리진 등록 (배포 필수)
+
+프론트엔드를 GitHub Pages로 배포합니다. 배포 주소가 확정됐습니다.
+
+```
+https://seo-yn.github.io/BreathAI/
+```
+
+`CORS_ALLOWED_ORIGINS`에 **경로를 뺀 오리진만** 넣어주세요. 로컬 개발용 주소도 함께 필요합니다.
+
+```
+CORS_ALLOWED_ORIGINS = https://seo-yn.github.io,http://localhost:5173
+```
+
+현재 두 오리진 모두 preflight가 403으로 거부됩니다. `SecurityConfig`가
+`setAllowCredentials(true)`라 와일드카드(`*`)는 쓸 수 없습니다.
+
+---
+
+## ④ ApiResponse에 에러 식별 코드 노출 (권장)
 
 `ErrorCode`에는 `A-008`, `A-009`, `A-010` 같은 식별 코드가 있고 주석에 "클라이언트 분기용
 식별 코드"라고 적혀 있는데, `ApiResponse`에 `code` 필드가 없어서 **응답에 실리지 않습니다.**
@@ -173,7 +192,7 @@ min_samples=None)` 형태로 인자화하고 `run_pipeline`에서 넘겨주시�
 
 ---
 
-## ④ FAQ 변경 이력의 `faqId` 필터 (선택)
+## ⑤ FAQ 변경 이력의 `faqId` 필터 (선택)
 
 `GET /api/v1/faq/history`가 전역 이력만 조회하고 `faqId` 필터를 받지 않습니다. 그래서
 FAQ 단건의 변경 이력을 보여주는 UI는 포기하고, **전역 "변경 이력" 탭**으로 만들었습니다
@@ -184,7 +203,7 @@ FAQ 단건의 변경 이력을 보여주는 UI는 포기하고, **전역 "변경
 
 ---
 
-## ⑤ 후보 반려 API (선택, 우선순위 낮음)
+## ⑥ 후보 반려 API (선택, 우선순위 낮음)
 
 승인은 `POST /api/v1/faq/apply`가 있는데 **반려에 해당하는 엔드포인트가 없습니다.**
 `ReviewStatus.REJECTED`와 `FaqActionLog`가 있는데 이를 기록할 통로가 없습니다.
