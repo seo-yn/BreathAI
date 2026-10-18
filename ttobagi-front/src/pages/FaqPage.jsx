@@ -3,6 +3,7 @@ import { faqApi } from "../api/faq.js";
 import { dashApi } from "../api/dashboard.js";
 import MatchedFaqBadge from "../components/MatchedFaqBadge.jsx";
 import { isAccepted } from "../utils/reviewStatus.js";
+import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 
@@ -284,7 +285,7 @@ export default function FaqPage() {
                       <span style={{ fontSize: 11, fontFamily: "monospace", color: "#C4C8CE" }}>#{f.faqId}</span>
                     </div>
                     <div style={S.faqQ}>{f.standardQuestion}</div>
-                    <div style={S.faqA}>{f.answer}</div>
+                    <div style={S.faqA}>{toPlainText(f.answer)}</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
                       {f.keywords?.map((k) => <span key={k} style={S.tag}>{k}</span>)}
                     </div>
@@ -371,7 +372,7 @@ export default function FaqPage() {
                   )}
                 </div>
 
-                <div style={S.faqA}>{c.answerDraft}</div>
+                <div style={S.faqA}>{toPlainText(c.answerDraft)}</div>
 
                 {/* 기존 학습데이터와 겹치는 항목 — 중복 반영을 막기 위해 질문 원문까지 보여준다 */}
                 {c.matchedFaqs?.length > 0 && (
@@ -465,7 +466,7 @@ export default function FaqPage() {
                 {(!h.beforeQuestion || h.beforeQuestion === h.afterQuestion) && (
                   <div style={S.faqQ}>{h.afterQuestion || h.beforeQuestion}</div>
                 )}
-                {h.afterAnswer && <div style={S.faqA}>{h.afterAnswer}</div>}
+                {h.afterAnswer && <div style={S.faqA}>{toPlainText(h.afterAnswer)}</div>}
 
                 {h.editReason && (
                   <div style={{ fontSize: 11, color: "#6B7280", marginTop: 6 }}>사유: {h.editReason}</div>
@@ -497,7 +498,7 @@ export default function FaqPage() {
               </div>
               <div>
                 <div style={S.modalLabel}>답변 초안</div>
-                <div style={{ ...S.modalValue, lineHeight: 1.7 }}>{modal.data.answerDraft}</div>
+                <div style={{ ...S.modalValue, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{toPlainText(modal.data.answerDraft)}</div>
               </div>
               {modal.data.similarQuestions?.length > 0 && (
                 <div>

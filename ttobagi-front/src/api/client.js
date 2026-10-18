@@ -32,11 +32,10 @@ export function setAuthExpiredHandler(fn) {
   onAuthExpired = fn;
 }
 
-// 이 백엔드는 만료/누락된 토큰에 대해 401(EXPIRED_TOKEN)을 거의 던지지 않는다 —
-// JwtAuthenticationFilter가 만료 예외를 catch(Exception)으로 삼키고 인증 없이 요청을
-// 통과시켜서, 실제로는 엔드포인트에 따라 403(빈 바디) 또는 404("사용자를 찾을 수 없습니다")로
-// 응답한다. 상태코드로 "토큰 만료"와 "진짜 권한/존재 오류"를 구분할 수 없으므로,
-// 응답을 보고 반응하는 대신 토큰 자체의 exp 클레임을 미리 읽어 만료 전에 선제 재발급한다.
+// 백엔드가 인증 실패를 401, 권한 부족을 403으로 명확히 구분해 응답한다
+// (SecurityConfig의 authenticationEntryPoint / accessDeniedHandler).
+// 그래도 만료 직전에 미리 갱신해두면 요청이 한 번 실패했다가 재시도되는 왕복을 줄일 수 있어
+// 토큰의 exp 클레임을 읽어 선제 재발급한다. 놓친 경우는 401 응답에서 1회 재시도로 처리한다.
 function decodeJwtExpMs(token) {
   try {
     const payload = token.split(".")[1];
@@ -56,6 +55,20 @@ function isAccessTokenExpiringSoon() {
   return Date.now() >= expMs - 10_000; // 만료 10초 전부터 미리 갱신
 }
 
+// HTTP 상태 코드별 기본 메시지. 백엔드가 JSON 바디를 못 주는 상황(프록시 오류 등)에서만 쓴다.
+const FALLBACK_MESSAGE = {
+  401: "로그인이 필요합니다.",
+  403: "권한이 없습니다.",
+  404: "요청한 정보를 찾을 수 없습니다.",
+  413: "파일이 너무 큽니다.",
+  500: "서버 내부 오류가 발생했습니다.",
+  502: "서버에 연결할 수 없습니다.",
+  503: "서버가 일시적으로 응답할 수 없습니다.",
+};
+
+// 응답 본문과 HTTP 상태를 함께 돌려준다.
+// 판단 기준은 HTTP 상태(res.status)이고, 본문의 status 필드는 참고값으로만 쓴다.
+// 403 응답은 백엔드가 {"message": ...}만 내려주어 success/status가 없기 때문이다.
 async function rawRequest(method, path, body, accessToken, isFormData) {
   const headers = {};
   if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
@@ -72,11 +85,19 @@ async function rawRequest(method, path, body, accessToken, isFormData) {
     throw new ApiError("서버에 연결할 수 없습니다.", 0, null);
   }
 
+  let json = null;
   try {
-    return await res.json();
+    json = await res.json();
   } catch {
-    throw new ApiError("서버 응답을 처리할 수 없습니다.", res.status, null);
+    // 본문이 비었거나 JSON이 아닌 경우 — 상태 코드만으로 처리한다
   }
+  return { res, json };
+}
+
+// 실패 응답을 ApiError로 바꾼다. 상태는 항상 HTTP 상태를 쓴다.
+function toApiError(res, json) {
+  const message = json?.message || FALLBACK_MESSAGE[res.status] || "요청 처리 중 오류가 발생했습니다.";
+  return new ApiError(message, res.status, json?.data ?? null);
 }
 
 // 동시에 여러 401이 터져도 재발급 요청은 한 번만 나가도록 공유
@@ -87,8 +108,8 @@ async function reissueTokens() {
 
   if (!refreshPromise) {
     refreshPromise = rawRequest("POST", "/api/v1/auth/reissue", { refreshToken }, null, false)
-      .then((json) => {
-        if (!json.success) throw new ApiError(json.message, json.status, json.data);
+      .then(({ res, json }) => {
+        if (!res.ok || json?.success !== true) throw toApiError(res, json);
         storeTokens(json.data);
         return json.data;
       })
@@ -123,25 +144,32 @@ export async function request(method, path, opts = {}) {
   if (!skipAuthRetry) await ensureFreshToken();
 
   const { accessToken } = getStoredTokens();
-  const json = await rawRequest(method, path, body, accessToken, isFormData);
+  let { res, json } = await rawRequest(method, path, body, accessToken, isFormData);
 
-  if (json.success) return json;
-
-  // 선제 갱신을 놓친 극히 드문 경우(시계 오차 등)의 최후 방어선 — 진짜 401일 때만 1회 재시도
-  if (json.status === 401 && !skipAuthRetry) {
+  // 401은 인증 실패(토큰 없음·만료·위조)다. 재발급을 1회 시도하고, 그래도 실패하면 로그아웃.
+  // 403(권한 부족)은 다시 로그인해도 해결되지 않으므로 토큰을 지우지 않는다.
+  if (res.status === 401 && !skipAuthRetry) {
     try {
       const { accessToken: newToken } = await reissueTokens();
-      const retryJson = await rawRequest(method, path, body, newToken, isFormData);
-      if (retryJson.success) return retryJson;
-      throw new ApiError(retryJson.message, retryJson.status, retryJson.data);
-    } catch (err) {
+      ({ res, json } = await rawRequest(method, path, body, newToken, isFormData));
+    } catch {
       clearTokens();
       onAuthExpired?.();
-      throw err instanceof ApiError ? err : new ApiError("인증이 만료되었습니다.", 401, null);
+      throw new ApiError("로그인이 만료되었습니다. 다시 로그인해주세요.", 401, null);
+    }
+    if (res.status === 401) {
+      clearTokens();
+      onAuthExpired?.();
+      throw toApiError(res, json);
     }
   }
 
-  throw new ApiError(json.message, json.status, json.data);
+  if (!res.ok) throw toApiError(res, json);
+
+  // 200인데 success:false인 경우까지 방어한다 (상태 코드와 본문이 어긋나는 응답)
+  if (json?.success === false) throw toApiError(res, json);
+
+  return json;
 }
 
 // Content-Disposition에서 파일명을 꺼낸다. 백엔드가 ASCII 파일명(faq_v3_20261011.csv)을
@@ -187,7 +215,12 @@ export async function requestFile(method, path, fallbackFileName = "download") {
     } catch {
       /* 에러 본문이 JSON이 아니면 상태 코드만으로 처리 */
     }
-    throw new ApiError(json?.message, json?.status ?? res.status, json?.data ?? null);
+    // 401이면 토큰이 끊긴 것이므로 로그인 화면으로 보낸다
+    if (res.status === 401) {
+      clearTokens();
+      onAuthExpired?.();
+    }
+    throw toApiError(res, json);
   }
 
   return {

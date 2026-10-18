@@ -4,8 +4,19 @@ import { dashApi } from "../api/dashboard.js";
 import { faqApi } from "../api/faq.js";
 import MatchedFaqBadge from "../components/MatchedFaqBadge.jsx";
 import { isAccepted } from "../utils/reviewStatus.js";
+import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
+
+// Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
+const MAX_UPLOAD_MB = 50;
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+
+function formatElapsed(sec) {
+  const m = Math.floor(sec / 60);
+  const r = sec % 60;
+  return m > 0 ? `${m}분 ${String(r).padStart(2, "0")}초 경과` : `${r}초 경과`;
+}
 
 const CLUSTER_COLORS = [
   "#1565C0","#43A047","#E53935","#FB8C00","#8E24AA",
@@ -62,6 +73,8 @@ export default function AnalyzePage() {
   const [analyzeResult, setAnalyzeResult] = useState(null);
   const [analysisId, setAnalysisId] = useState(null);
   const [reviewing, setReviewing]   = useState(null); // 반영 중인 candidateId
+  const [startedAt, setStartedAt]   = useState(null); // 분석 시작 시각
+  const [elapsed, setElapsed]       = useState(0);    // 경과 초
   const [options, setOptions]       = useState({
     periodStartDate: "",
     periodEndDate: "",
@@ -89,6 +102,14 @@ export default function AnalyzePage() {
     streamRef.current?.close();
     stopPolling();
   }, [stopPolling]);
+
+  // AI가 중간 단계를 보고하지 않아 진행률이 멈춘 것처럼 보이므로,
+  // 경과 시간을 표시해 작업이 살아 있다는 것을 알린다.
+  useEffect(() => {
+    if (!running || !startedAt) return;
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [running, startedAt]);
 
   // 반영(/faq/apply)은 백엔드가 @PreAuthorize("hasRole('ADMIN')")로 막는다
   const isAdmin = user?.role === "ADMIN";
@@ -124,8 +145,19 @@ export default function AnalyzePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 백엔드 AnalysisUploadReader가 .csv와 .xlsx를 모두 받고, xlsx는 서버에서 CSV로 변환해
+  // AI 서버로 넘긴다. 크기 상한은 Spring multipart 설정(max-file-size=50MB)과 맞춘다.
   const handleFile = (f) => {
-    if (!f.name.endsWith(".xlsx")) { toast.error(".xlsx 파일만 업로드 가능합니다."); return; }
+    if (!f) return;
+    const name = f.name.toLowerCase();
+    if (!name.endsWith(".xlsx") && !name.endsWith(".csv")) {
+      toast.error("CSV 또는 XLSX 파일만 업로드할 수 있습니다.");
+      return;
+    }
+    if (f.size > MAX_UPLOAD_BYTES) {
+      toast.error(`파일이 너무 큽니다. 최대 ${MAX_UPLOAD_MB}MB까지 업로드할 수 있습니다.`);
+      return;
+    }
     setFile(f);
   };
 
@@ -138,6 +170,8 @@ export default function AnalyzePage() {
     setRunning(true);
     setDone(false);
     setStep(-1);
+    setStartedAt(Date.now());
+    setElapsed(0);
 
     try {
       const res = await dashApi.uploadAndAnalyze(file, {
@@ -295,7 +329,7 @@ export default function AnalyzePage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={S.card}>
               <div style={S.cardHeader}>
-                <span style={S.cardTitle}>① 신규 로그 엑셀 업로드</span>
+                <span style={S.cardTitle}>① 신규 로그 업로드</span>
                 <span style={S.badge}>1달 분량</span>
               </div>
               <div style={S.cardBody}>
@@ -304,19 +338,30 @@ export default function AnalyzePage() {
                     최근 분석 클러스터 <strong style={{ color: "#1565C0" }}>{analyzeResult.clusteringView.clusterNames.length}개</strong>
                   </div>
                 )}
-                <input type="file" accept=".xlsx" style={{ display: "none" }} id="fileInput"
+                {/* 업로드는 백엔드가 @PreAuthorize("hasRole('ADMIN')")로 막는다 (403) */}
+                {!isAdmin && (
+                  <div style={S.permissionNotice}>
+                    로그 업로드와 분석 실행은 <strong>관리자 계정</strong>만 가능합니다.
+                  </div>
+                )}
+                <input type="file" accept=".xlsx,.csv" style={{ display: "none" }} id="fileInput"
+                  disabled={!isAdmin}
                   onChange={(e) => handleFile(e.target.files[0])} />
                 <div
-                  style={{ ...S.dropzone, ...(drag ? S.dropzoneDrag : {}) }}
-                  onClick={() => document.getElementById("fileInput").click()}
-                  onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+                  style={{
+                    ...S.dropzone,
+                    ...(drag ? S.dropzoneDrag : {}),
+                    ...(isAdmin ? {} : S.dropzoneDisabled),
+                  }}
+                  onClick={() => { if (isAdmin) document.getElementById("fileInput").click(); }}
+                  onDragOver={(e) => { if (!isAdmin) return; e.preventDefault(); setDrag(true); }}
                   onDragLeave={() => setDrag(false)}
-                  onDrop={(e) => { e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); }}>
+                  onDrop={(e) => { if (!isAdmin) return; e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); }}>
                   <div style={{ fontSize: 36, marginBottom: 10 }}>📂</div>
                   <div style={{ fontSize: 14, fontWeight: 500, color: "#374151", marginBottom: 4 }}>
-                    {file ? file.name : "엑셀 파일을 드래그하거나 클릭하여 선택"}
+                    {file ? file.name : "CSV 또는 엑셀 파일을 드래그하거나 클릭하여 선택"}
                   </div>
-                  <div style={{ fontSize: 12, color: "#9CA3AF" }}>.xlsx 형식, 최대 50MB</div>
+                  <div style={{ fontSize: 12, color: "#9CA3AF" }}>.csv 또는 .xlsx, 최대 {MAX_UPLOAD_MB}MB</div>
                 </div>
                 <div style={S.optionBox}>
                   <div style={S.optionTitle}>분석 옵션</div>
@@ -419,6 +464,18 @@ export default function AnalyzePage() {
                         </div>
                       );
                     })}
+                    {running && (
+                      <div style={S.runningBox}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span>분석 진행 중</span>
+                          <span style={{ fontFamily: "monospace" }}>{formatElapsed(elapsed)}</span>
+                        </div>
+                        <div style={{ fontSize: 11, marginTop: 6, lineHeight: 1.5, opacity: 0.85 }}>
+                          AI 서버가 중간 단계를 보고하지 않아 완료 전까지 위 단계 표시가 갱신되지 않을 수 있습니다.
+                          화면을 벗어나도 분석은 계속되며, 돌아오면 이력에서 결과를 확인할 수 있습니다.
+                        </div>
+                      </div>
+                    )}
                     {done && (
                       <div style={{ ...S.successBox, marginTop: 8 }}>
                         🎉 분석 완료! <strong>FAQ 추천</strong> 탭에서 결과를 확인하세요.
@@ -566,7 +623,7 @@ export default function AnalyzePage() {
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6, marginBottom: 10 }}>{c.answerDraft}</div>
+                <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6, marginBottom: 10 }}>{toPlainText(c.answerDraft)}</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                   {(c.synonyms || []).map((s, i) => (
                     <span key={i} style={{
@@ -613,8 +670,11 @@ const S = {
   checkLabel:  { fontSize: 12, color: "#374151", display: "flex", alignItems: "center", gap: 5, cursor: "pointer" },
   pendingTag:  { fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 8, background: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" },
   dropzoneDrag:{ borderColor: "#1565C0", background: "#EFF8FF" },
+  dropzoneDisabled: { opacity: 0.5, cursor: "not-allowed", background: "#F9FAFB" },
+  permissionNotice: { padding: "10px 12px", background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 8, fontSize: 12, color: "#92400E", marginBottom: 10 },
   btnPrimary:  { padding: "10px 20px", background: "#1565C0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   btnAccept:   { padding: "6px 14px", background: "#D1FAE5", color: "#065F46", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   btnReject:   { padding: "6px 14px", background: "#FDECEA", color: "#B91C1C", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  runningBox:  { marginTop: 10, padding: "10px 14px", background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1E40AF" },
   successBox:  { marginTop: 10, padding: "10px 14px", background: "#D1FAE5", borderRadius: 8, fontSize: 13, color: "#065F46" },
 };
