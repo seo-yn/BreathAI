@@ -22,6 +22,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -88,14 +89,21 @@ class ApiIntegrationTest {
         String user = userToken();
         Faq faq = saveFaq();
 
+        // 메서드 권한(업로드)과 경로 권한(FAQ 수정·삭제) 어느 쪽에서 막혀도 같은 오류 형식이다
         mvc.perform(multipart("/api/v1/dashboard/analyze/upload").file(csv("user.csv"))
                         .header(HttpHeaders.AUTHORIZATION, bearer(user)))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.status").value(403));
         mvc.perform(withJson(patch("/api/v1/faq/" + faq.getFaqId()), updateBody("수정"))
                         .header(HttpHeaders.AUTHORIZATION, bearer(user)))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.status").value(403));
         mvc.perform(delete("/api/v1/faq/" + faq.getFaqId()).header(HttpHeaders.AUTHORIZATION, bearer(user)))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.status").value(403));
     }
 
     @Test
@@ -196,6 +204,19 @@ class ApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("분석 이력의 기간은 없으면 null이고, 한쪽만 있으면 그쪽만 보인다")
+    void historyPeriodHandlesMissingDates() throws Exception {
+        String admin = adminToken();
+        Long none = upload(admin, csv("period-none.csv"));
+        Long startOnly = upload(admin, csv("period-start.csv"), "2026-08-01", null);
+        Long both = upload(admin, csv("period-both.csv"), "2026-08-01", "2026-08-31");
+
+        assertThat(periodOf(admin, none)).isNull();
+        assertThat(periodOf(admin, startOnly)).isEqualTo("2026-08-01 ~");
+        assertThat(periodOf(admin, both)).isEqualTo("2026-08-01 ~ 2026-08-31");
+    }
+
+    @Test
     @DisplayName("실패 콜백을 받으면 FAIL로 바뀐다")
     void failedCallbackMarksFail() throws Exception {
         String admin = adminToken();
@@ -225,11 +246,70 @@ class ApiIntegrationTest {
 
         mvc.perform(withJson(post("/api/v1/faq/apply"), apply).header(HttpHeaders.AUTHORIZATION, bearer(userToken())))
                 .andExpect(status().isForbidden());
-        mvc.perform(withJson(post("/api/v1/faq/apply"), apply).header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+        Number faqId = JsonPath.read(body(mvc.perform(withJson(post("/api/v1/faq/apply"), apply)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(admin)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.appliedFaqId").isNumber());
+                .andExpect(jsonPath("$.data.appliedFaqId").isNumber())
+                .andReturn()), "$.data.appliedFaqId");
         mvc.perform(withJson(post("/api/v1/faq/apply"), apply).header(HttpHeaders.AUTHORIZATION, bearer(admin)))
                 .andExpect(status().isConflict());
+
+        // 카테고리 코드를 지정하지 않으면 후보의 카테고리를 그대로 쓴다
+        mvc.perform(get("/api/v1/faq/" + faqId).header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.category").value("이용안내"));
+    }
+
+    @Test
+    @DisplayName("후보를 반영하며 카테고리 코드를 바꾸면 카테고리 이름은 마스터에서 찾는다")
+    void applyWithChangedQTypeUsesMasterCategory() throws Exception {
+        String admin = adminToken();
+        Long analysisId = upload(admin, csv("apply-qtype.csv"));
+        callback("/api/v1/dashboard/analyze/callback/" + analysisId, completedBody());
+
+        String recommendations = body(mvc.perform(get("/api/v1/faq/recommendations/" + analysisId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                .andExpect(status().isOk()).andReturn());
+        Number clusterId = JsonPath.read(recommendations, "$.data.recommendations[0].clusterId");
+        Number candidateId = JsonPath.read(recommendations, "$.data.recommendations[0].candidateId");
+        String apply = "{\"analysisId\":" + analysisId + ",\"clusterId\":" + clusterId + ",\"candidateId\":" + candidateId
+                + ",\"qType\":188,\"finalQuestion\":\"반영 질문 " + UUID.randomUUID() + "\",\"finalAnswer\":\"반영 답변\""
+                + ",\"keywords\":[\"환승\"],\"isManualPatchConfirmed\":true}";
+
+        Number faqId = JsonPath.read(body(mvc.perform(withJson(post("/api/v1/faq/apply"), apply)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                .andExpect(status().isOk()).andReturn()), "$.data.appliedFaqId");
+        mvc.perform(get("/api/v1/faq/" + faqId).header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.qType").value(188))
+                .andExpect(jsonPath("$.data.category").value("열차운영관련"));
+    }
+
+    @Test
+    @DisplayName("FAQ의 카테고리 코드를 바꾸면 카테고리 이름도 마스터를 따라 바뀐다")
+    void categoryFollowsQType() throws Exception {
+        String admin = adminToken();
+        Faq faq = faqRepository.save(Faq.builder()
+                .question("카테고리 시험 질문 " + UUID.randomUUID())
+                .answer("카테고리 시험 답변")
+                .qType(176)
+                .category("옛 카테고리")
+                .build());
+        String path = "/api/v1/faq/" + faq.getFaqId();
+
+        // 같은 코드로 다시 저장하면 카테고리는 그대로다
+        patchFaq(admin, path, updateBody(176, "답변 1"));
+        assertCategory(admin, path, "옛 카테고리");
+
+        patchFaq(admin, path, updateBody(172, "답변 2"));
+        assertCategory(admin, path, "승차권/운임");
+
+        // 마스터에 없는 코드로 바꾸면 예전 이름을 남기지 않는다
+        patchFaq(admin, path, updateBody(999, "답변 3"));
+        mvc.perform(get(path).header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.qType").value(999))
+                .andExpect(jsonPath("$.data.category").value(org.hamcrest.Matchers.nullValue()));
     }
 
     @Test
@@ -287,7 +367,8 @@ class ApiIntegrationTest {
     private void signup(String email, String adminCode) throws Exception {
         String code = adminCode == null ? "" : ",\"adminCode\":\"" + adminCode + "\"";
         mvc.perform(withJson(post("/api/v1/auth/signup"), "{\"email\":\"" + email + "\",\"password\":\"" + PASSWORD + "\"" + code + "}"))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value(201));
     }
 
     private String login(String email, String password) throws Exception {
@@ -296,12 +377,39 @@ class ApiIntegrationTest {
     }
 
     private Long upload(String token, MockMultipartFile file) throws Exception {
-        String response = body(mvc.perform(multipart("/api/v1/dashboard/analyze/upload").file(file)
-                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+        return upload(token, file, null, null);
+    }
+
+    private Long upload(String token, MockMultipartFile file, String startDate, String endDate) throws Exception {
+        MockMultipartHttpServletRequestBuilder request = multipart("/api/v1/dashboard/analyze/upload").file(file);
+        if (startDate != null) request.param("periodStartDate", startDate);
+        if (endDate != null) request.param("periodEndDate", endDate);
+        String response = body(mvc.perform(request.header(HttpHeaders.AUTHORIZATION, bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PENDING"))
                 .andReturn());
         return ((Number) JsonPath.read(response, "$.data.analysisId")).longValue();
+    }
+
+    // 이력은 최신순이고 다른 시험의 분석도 섞여 있어 넉넉히 받아 분석 ID로 찾는다
+    private Object periodOf(String token, Long analysisId) throws Exception {
+        String history = body(mvc.perform(get("/api/v1/dashboard/analyze/history?page=0&size=100")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk()).andReturn());
+        List<Object> periods = JsonPath.read(history, "$.data.history[?(@.analysisId == " + analysisId + ")].period");
+        assertThat(periods).hasSize(1);
+        return periods.get(0);
+    }
+
+    private void patchFaq(String token, String path, String json) throws Exception {
+        mvc.perform(withJson(patch(path), json).header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk());
+    }
+
+    private void assertCategory(String token, String path, String expected) throws Exception {
+        mvc.perform(get(path).header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.category").value(expected));
     }
 
     private void callback(String path, String json) throws Exception {
@@ -361,7 +469,11 @@ class ApiIntegrationTest {
     }
 
     private String updateBody(String answer) {
-        return "{\"qType\":176,\"standardQuestion\":\"통합테스트 수정 질문\",\"answer\":\"" + answer + "\","
+        return updateBody(176, answer);
+    }
+
+    private String updateBody(int qType, String answer) {
+        return "{\"qType\":" + qType + ",\"standardQuestion\":\"통합테스트 수정 질문\",\"answer\":\"" + answer + "\","
                 + "\"keywords\":[\"시험\"],\"editReason\":\"통합테스트\"}";
     }
 
