@@ -3,7 +3,7 @@
 API 명세서(`API_명세서__DTO.pdf`, 19쪽)와 실제 BE 동작이 다른 부분을 정리한다.
 FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 
-- 기준 코드: `develop` `d47e1fc` (2026-10-18), 이후 #61 수정(응답 형식·이력 기간·FAQ 카테고리) 반영
+- 기준 코드: `develop` `d47e1fc` (2026-10-18), 이후 #61 수정(응답 형식·이력 기간·FAQ 카테고리), #64(SSE 8시간), #66(AI 파일별 요약값 저장) 반영
 - 확인 방법: 명세서 원문과 코드를 대조하고, 로컬에서 BE를 띄워 모든 API(69건)를 실제로 호출해 응답을 확인했다.
 - 명세서와 같은 부분은 적지 않는다. 표의 "결정일"이 비어 있으면 이번 정리에서 처음 기록한 것이다.
 - [7. 결정 대기](#7-결정-대기)에 있는 항목은 코드를 고칠지 명세를 고칠지 아직 정하지 않았다.
@@ -43,17 +43,19 @@ FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 
 | API | 명세 | 실제 동작 | 결정일 |
 |---|---|---|---|
-| `GET /dashboard/usage` | — | 같다 | |
+| `GET /dashboard/usage` | — | **사용하지 않는다.** 챗봇 서비스 전체 질문 자료가 없어 값은 항상 0이다(API는 남겨 둔다). 업로드 파일의 날짜별 건수는 분석 결과의 `usageStats`로 본다 | 2026-10-18 |
 | `GET /dashboard/analyze/result` | 예시 `startDate=2026 04 01`, `trend[].date`는 `"03-20"` | 날짜 파라미터는 `yyyy-MM-dd`. 둘 다 생략하면 가장 최근 완료 분석을 보여 준다. 그 기간에 완료된 분석이 없으면 404. **`trend[].date`는 `"2026-03-20"`(yyyy-MM-dd)** | 2026-10-04 |
 | (위 응답) `faqCandidates[]` | `category`만 있음 | `candidateType`, `qType`, `category`, `similarQuestions`(클러스터의 실제 질문들)가 함께 온다 | |
-| (위 응답) `systemStatus`, `performanceMetrics` | AI 분석 결과 값 | BE가 저장된 데이터로 다시 계산한다 → [결정 대기](#7-결정-대기) | |
+| (위 응답) `systemStatus`, `performanceMetrics` | AI 분석 결과 값 | **AI가 보낸 업로드 파일별 값을 그대로 쓴다.** `totalLogCount`는 업로드 전체 행 수(좌표 수와 다를 수 있음), `currentUnanswerRate`는 개선 전 미답변율(미답변 ÷ 전체 × 100, 소수 2자리). 여러 파일을 합칠 때는 건수를 더한 뒤 같은 공식으로 다시 계산한다. AI가 `null`로 보내는 `predictedAccuracyGain`·`resolvedCountByAI`는 `0`으로 나온다. 요약값이 없는 예전 분석은 좌표 수로 센다 | 2026-10-18 |
+| (위 응답) `usageStats` (새 필드) | 없음 | 업로드 파일의 날짜별 건수 `[{statDate, totalCnt, answerCnt, lowQualityCount, unanswerCnt}]`(날짜 오름차순). 여러 파일은 날짜별로 더한다. 예전 형식 분석은 `totalCnt`·`answerCnt`가 `null`. `trend`도 같은 자료에서 만든다 | 2026-10-18 |
+| (위 응답) `burstKeywords` | — | `surgeDetection`을 요약한 것. 처음 나온 키워드(`surgeDetection[].isNew = true`)는 증가율이 없어 `increasedRate`가 `0`으로 나온다 | 2026-10-18 |
 | `GET /dashboard/analyze/{analysisId}/result` | — | 위와 같고, 맨 위에 `status`(분석 상태)가 더 온다 | 2026-10-04 |
 | `POST /dashboard/analyze/upload` | `file: logs.xlsx` | **관리자만**(일반 사용자 403). 파일은 **`.xlsx`, `.csv`만**(그 외 400), 빈 파일 400, 최대 50MB(넘으면 413). `periodStartDate`·`periodEndDate`(yyyy-MM-dd)는 생략 가능, `isMaskingEnabled` 기본 true, `isTranslationEnabled` 기본 false | 2026-10-17 |
 | (위 응답) | `status: "PREPROCESSING"` | 처음 상태는 **`PENDING`**. `message`가 더 오고, `submittedAt`은 `Z`를 붙인다. 같은 파일을 다시 올리면 새로 분석하지 않고 기존 분석을 돌려준다(이전 분석이 실패했으면 다시 분석) | 2026-10-17 |
 | (위 동작) | 없음 | 업로드한 원본은 Object Storage에 보관하고 위치를 DB에 기록한다. 응답에는 영향이 없다 | 2026-10-18 |
 | `POST /dashboard/analyze/callback/{analysisId}` | 인증 없음, 응답 `status` 201 | AI 서버 전용. **`Authorization: Bearer <TTOBAGI_CALLBACK_TOKEN>` 필요**(없거나 틀리면 401). 응답은 HTTP·본문 모두 200. AI 서버가 응답 코드를 어떻게 판단하는지(재전송 등) 확인하기 전이라 명세의 201로 바꾸지 않는다. 본문 형식은 [5. BE↔AI](#5-beai-연동-명세에-없음) 참고 | 2026-10-18 |
 | `GET /dashboard/analyze/{analysisId}` | `progress`(선택) | `progress`는 항상 `null`(AI가 진행률을 보내지 않음). 없는 분석은 404 | |
-| `GET /dashboard/analyze/stream/{analysisId}` | `event:status`, `data:{status, message}` | 같다. 단 **토큰이 필요**하다. 브라우저 기본 `EventSource`는 헤더를 못 붙이므로 헤더를 붙일 수 있는 방식으로 연결해야 한다. 연결하자마자 현재 상태를 한 번 보내고, **20초마다 빈 신호(SSE 주석 `:heartbeat`)**를 보낸다. 완료·실패한 분석은 상태를 보내고 바로 끝낸다. 연결은 최대 1시간. 같은 분석을 여러 명이 동시에 구독할 수 있다 | 2026-10-17 |
+| `GET /dashboard/analyze/stream/{analysisId}` | `event:status`, `data:{status, message}` | 같다. 단 **토큰이 필요**하다. 브라우저 기본 `EventSource`는 헤더를 못 붙이므로 헤더를 붙일 수 있는 방식으로 연결해야 한다. 연결하자마자 현재 상태를 한 번 보내고, **20초마다 빈 신호(SSE 주석 `:heartbeat`)**를 보낸다. 완료·실패한 분석은 상태를 보내고 바로 끝낸다. 연결은 **최대 8시간**(분석이 오래 걸리므로 2026-10-18에 1시간에서 늘림). 그 전에 끊기면 다시 연결하면 되고, 다시 연결하면 현재 상태부터 받는다. 같은 분석을 여러 명이 동시에 구독할 수 있다 | 2026-10-18 |
 | `GET /dashboard/analyze/history` | — | `page`(기본 0), `size`(기본 10). `period`는 기간이 있으면 `"2026-08-01 ~ 2026-08-31"`, 시작일만 있으면 `"2026-08-01 ~"`, 종료일만 있으면 `"~ 2026-08-31"`, 둘 다 없으면 `null` | 2026-10-18 |
 
 ## 4. faq
@@ -78,17 +80,21 @@ FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 | BE → AI | `POST {TTOBAGI_AI_SERVER}/pipeline`, multipart. `Authorization: Bearer <TTOBAGI_AI_API_TOKEN>`. **xlsx는 BE가 첫 시트를 UTF-8 CSV로 바꿔서 보낸다**(AI는 CSV만 받음). DB에 분석 기록이 저장된 뒤에 보낸다. 연결 실패·4xx·5xx·2분 무응답이면 분석을 `FAIL`로 바꾸고 SSE로 알린다 | 2026-10-17 |
 | AI → BE | `POST /api/v1/dashboard/analyze/callback/{analysisId}`, `Authorization: Bearer <TTOBAGI_CALLBACK_TOKEN>` | 2026-10-18 |
 | 콜백 `status` | `PREPROCESSING`, `ANALYZING`(중간 상태, 상태만 바꿈), `COMPLETED`(결과 저장), `FAIL` 또는 `FAILED`(실패, `errorMessage` 저장) | 2026-10-17 |
-| 콜백 본문 | 명세의 `clusters`, `unansweredStats`, `surgeDetections`, `performance`는 실제와 다르다. 실제 필드는 `status`, `errorMessage`, `systemStatus`, `performanceMetrics`, `trend`, `burstKeywords`, `unanswerAnalysis`, `clusteringView`, `faqCandidates`, `evaluation`, `surgeDetection`, `usageStats`이고, 구조는 분석 결과 조회 응답과 거의 같다. `trend[].date`는 `MM-dd`도 받으며, BE가 분석 기간의 연도를 붙여 저장한다 | |
+| 콜백 본문 | 명세의 `clusters`, `unansweredStats`, `surgeDetections`, `performance`는 실제와 다르다. 실제 필드는 `status`, `errorMessage`, `systemStatus`, `performanceMetrics`, `trend`, `burstKeywords`, `unanswerAnalysis`, `clusteringView`, `faqCandidates`, `evaluation`, `surgeDetection`, `usageStats`이고, 구조는 분석 결과 조회 응답과 거의 같다. `trend[].date`는 `MM-dd`도 받으며, BE가 분석 기간의 연도를 붙여 저장한다. 그 밖의 필드(`metricsScope`, `visualizedLogCount` 등)는 무시한다 | |
+| 콜백 값의 범위 | — | 값은 모두 **업로드 파일(분석 입력) 범위**다(AI 계약 문서 `docs/dashboard-callback-metrics.md`). BE는 `systemStatus`·`performanceMetrics`를 분석별로, `usageStats`를 분석·날짜별로 저장하고, 서비스 전체 사용량 테이블(`gold_usage_stat`)에는 쓰지 않는다. `usageStats`가 없는 예전 형식은 `trend`로 저품질·미답변 건수만 저장한다. 유형별 합이 `totalLogCount`와 다르면 거절하지 않고 서버 로그에 경고만 남긴다 | 2026-10-18 |
+| 알아 둘 점 | — | 업로드 파일에 `logType` 칸이 없으면 AI는 전부 미답변으로 센다. 미답변 데이터 파일을 올리면 미답변율이 100%로 나오는 것이 정상이다. 콜백의 `evaluation`은 서비스 전체 사용량 테이블에 그 날짜 행이 있을 때만 저장되므로, 지금은 저장되지 않는다(AI도 보내지 않음) | 2026-10-18 |
 | 중복 콜백 | 이미 완료·실패한 분석에 온 콜백은 저장하지 않고 200을 응답한다(AI가 다시 보내지 않도록) | 2026-10-17 |
 
 ## 6. DB 설계
 
-이번 변경으로 스키마는 바뀌지 않았다(Flyway V5까지). 팀 ERD는 현재 스키마와 같다.
+Flyway V6(2026-10-18)에서 바뀌었다. 팀 ERD도 갱신해야 한다.
+
+- `gold_analysis_job`: `total_log_count`, `correct_count`, `low_quality_count`, `unanswer_count`, `current_unanswer_rate`, `predicted_accuracy_gain`, `resolved_count_by_ai` 추가 (모두 빈 값 허용)
+- `gold_analysis_daily_stat` 새 테이블: 분석·날짜별 `total_cnt`, `answer_cnt`, `low_quality_count`, `unanswer_cnt` (`analysis_id` + `stat_date` 고유)
+- 분석 행을 지울 때는 `gold_analysis_daily_stat`의 해당 행을 먼저 지워야 한다 (외래키)
 
 ## 7. 결정 대기
 
 명세와 다르지만 코드를 고칠지 명세를 고칠지 아직 정하지 않은 것. 정하면 위 표에 결정일을 적고 여기서 지운다.
 
-| 번호 | 내용 | 영향 |
-|---|---|---|
-| 1 | 분석 결과의 `systemStatus`는 AI가 보낸 값이 아니라 클러스터 점(`clusteringView.points`) 수로 다시 센다. `performanceMetrics.currentUnanswerRate`에는 개선 후 미답변률(`evaluation.afterUnanswerRate`)이 들어간다 | AI가 점을 표본으로만 보내면 전체 로그 수가 작게 나온다. AI 담당과 확인 필요 |
+현재 없음. (2026-10-18 `systemStatus` 계산 방식은 #66에서 AI 값을 그대로 쓰도록 정리했다)

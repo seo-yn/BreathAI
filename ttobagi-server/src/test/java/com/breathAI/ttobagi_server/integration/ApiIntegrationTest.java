@@ -217,6 +217,89 @@ class ApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("AI 새 형식 콜백의 파일별 요약값은 좌표 수로 다시 세지 않고 그대로 보여 준다")
+    void summaryFromAiIsShownAsIs() throws Exception {
+        String admin = adminToken();
+        Long analysisId = upload(admin, csv("summary.csv"), "2026-08-01", "2026-08-14");
+        // 전체 10건 중 좌표는 2건뿐이고, 계약 문서에만 있는 필드(metricsScope 등)도 함께 온다
+        callback("/api/v1/dashboard/analyze/callback/" + analysisId, summaryCallback(10, 0, 0, 10, "100.0",
+                usage("2026-08-01", 6, 0, 0, 6) + "," + usage("2026-08-02", 4, 0, 0, 4), 2));
+
+        mvc.perform(get("/api/v1/dashboard/analyze/" + analysisId + "/result").header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.systemStatus.totalLogCount").value(10))
+                .andExpect(jsonPath("$.data.systemStatus.samplingStatus.unanswer").value(10))
+                .andExpect(jsonPath("$.data.performanceMetrics.currentUnanswerRate").value(100.0))
+                .andExpect(jsonPath("$.data.clusteringView.points.length()").value(2))
+                .andExpect(jsonPath("$.data.usageStats.length()").value(2))
+                .andExpect(jsonPath("$.data.usageStats[0].statDate").value("2026-08-01"))
+                .andExpect(jsonPath("$.data.usageStats[0].totalCnt").value(6))
+                .andExpect(jsonPath("$.data.trend[1].date").value("2026-08-02"))
+                .andExpect(jsonPath("$.data.trend[1].unanswerCount").value(4));
+    }
+
+    @Test
+    @DisplayName("기간 조회는 파일별 건수를 더해 미답변율을 다시 계산하고, 서비스 전체 사용량에는 쓰지 않는다")
+    void periodResultSumsFilesWithoutTouchingServiceUsage() throws Exception {
+        String admin = adminToken();
+        // 다른 시험의 분석과 섞이지 않도록 먼 기간을 쓴다
+        Long first = upload(admin, csv("period-a.csv"), "2031-01-01", "2031-01-15");
+        Long second = upload(admin, csv("period-b.csv"), "2031-01-16", "2031-01-31");
+        callback("/api/v1/dashboard/analyze/callback/" + first, summaryCallback(10, 5, 0, 5, "50.0",
+                usage("2031-01-05", 10, 5, 0, 5), 0));
+        callback("/api/v1/dashboard/analyze/callback/" + second, summaryCallback(30, 27, 0, 3, "10.0",
+                usage("2031-01-05", 20, 18, 0, 2) + "," + usage("2031-01-20", 10, 9, 0, 1), 0));
+
+        mvc.perform(get("/api/v1/dashboard/analyze/result?startDate=2031-01-01&endDate=2031-01-31")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.systemStatus.totalLogCount").value(40))
+                .andExpect(jsonPath("$.data.systemStatus.samplingStatus.correct").value(32))
+                .andExpect(jsonPath("$.data.systemStatus.samplingStatus.unanswer").value(8))
+                .andExpect(jsonPath("$.data.performanceMetrics.currentUnanswerRate").value(20.0))
+                .andExpect(jsonPath("$.data.usageStats.length()").value(2))
+                .andExpect(jsonPath("$.data.usageStats[0].totalCnt").value(30))
+                .andExpect(jsonPath("$.data.usageStats[0].unanswerCnt").value(7));
+
+        mvc.perform(get("/api/v1/dashboard/usage?year=2031&month=1").header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalUsageCount").value(0))
+                .andExpect(jsonPath("$.data.dailyUsage.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("요약값이 없는 예전 형식 콜백은 좌표 수와 trend로 예전처럼 보여 준다")
+    void legacyCallbackFallsBack() throws Exception {
+        String admin = adminToken();
+        Long analysisId = upload(admin, csv("legacy.csv"), "2026-08-01", "2026-08-31");
+        callback("/api/v1/dashboard/analyze/callback/" + analysisId, "{\"status\":\"COMPLETED\","
+                + "\"trend\":[{\"date\":\"08-03\",\"unanswerCount\":2,\"lowQualityCount\":1}],"
+                + "\"clusteringView\":{\"clusterNames\":[{\"clusterLabel\":1,\"name\":\"예전\",\"topKeywords\":[\"환승\"],\"size\":1}],"
+                + "\"points\":[{\"x\":0.1,\"y\":0.2,\"clusterLabel\":1,\"text\":\"환승\",\"sourceLogSeqNum\":1,\"logType\":\"UNANSWER\"}]},"
+                + "\"faqCandidates\":[]}");
+
+        mvc.perform(get("/api/v1/dashboard/analyze/" + analysisId + "/result").header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.systemStatus.totalLogCount").value(1))
+                .andExpect(jsonPath("$.data.trend[0].date").value("2026-08-03"))
+                .andExpect(jsonPath("$.data.usageStats[0].unanswerCnt").value(2))
+                .andExpect(jsonPath("$.data.usageStats[0].totalCnt").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    @DisplayName("요약값 합계가 맞지 않아도 분석은 완료되고 받은 전체 건수를 그대로 둔다")
+    void mismatchedSummaryIsStillSaved() throws Exception {
+        String admin = adminToken();
+        Long analysisId = upload(admin, csv("mismatch.csv"));
+        callback("/api/v1/dashboard/analyze/callback/" + analysisId, summaryCallback(5, 1, 1, 1, "20.0", "", 0));
+
+        assertStatus(admin, analysisId, "COMPLETED");
+        mvc.perform(get("/api/v1/dashboard/analyze/" + analysisId + "/result").header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.systemStatus.totalLogCount").value(5));
+    }
+
+    @Test
     @DisplayName("실패 콜백을 받으면 FAIL로 바뀐다")
     void failedCallbackMarksFail() throws Exception {
         String admin = adminToken();
@@ -466,6 +549,30 @@ class ApiIntegrationTest {
                 + "\"candidateType\":\"NEW\",\"standardQuestion\":\"환승은 어떻게 하나요?\",\"answerDraft\":\"안내 표지를 따라 이동하세요.\","
                 + "\"qType\":null,\"category\":\"이용안내\",\"similarQuestions\":[\"환승 문의\"],\"occurrenceCount\":5,"
                 + "\"representativeKeywords\":[\"환승\"],\"synonyms\":[{\"text\":\"갈아타기\",\"type\":\"SYNONYM\"}],\"matchedFaqs\":[]}]}";
+    }
+
+    // AI 계약 문서(docs/dashboard-callback-metrics.md) 형식의 완료 콜백, 좌표는 pointCount개만 보낸다
+    private String summaryCallback(int total, int correct, int lowQuality, int unanswer, String rate,
+                                   String usageStats, int pointCount) {
+        StringBuilder points = new StringBuilder();
+        for (int i = 1; i <= pointCount; i++) {
+            if (i > 1) points.append(',');
+            points.append("{\"x\":0.").append(i).append(",\"y\":0.5,\"clusterLabel\":1,\"text\":\"문의 ").append(i)
+                    .append("\",\"sourceLogSeqNum\":").append(i).append(",\"logType\":\"UNANSWER\"}");
+        }
+        return "{\"status\":\"COMPLETED\",\"metricsScope\":\"ANALYSIS_INPUT\",\"sourceLogIdScope\":\"UPLOAD_LOCAL\","
+                + "\"systemStatus\":{\"totalLogCount\":" + total + ",\"samplingStatus\":{\"correct\":" + correct
+                + ",\"lowQuality\":" + lowQuality + ",\"unanswer\":" + unanswer + "},\"visualizedLogCount\":" + pointCount
+                + ",\"excludedLogCount\":" + (total - pointCount) + ",\"isSampled\":false},"
+                + "\"performanceMetrics\":{\"currentUnanswerRate\":" + rate + ",\"predictedAccuracyGain\":null,\"resolvedCountByAI\":null},"
+                + "\"usageStats\":[" + usageStats + "],\"burstKeywords\":[],\"surgeDetection\":[],"
+                + "\"clusteringView\":{\"clusterNames\":[{\"clusterLabel\":1,\"name\":\"문의\",\"topKeywords\":[\"문의\"],\"size\":" + pointCount + "}],"
+                + "\"points\":[" + points + "]},\"faqCandidates\":[]}";
+    }
+
+    private String usage(String date, int total, int answer, int lowQuality, int unanswer) {
+        return "{\"statDate\":\"" + date + "\",\"totalCnt\":" + total + ",\"answerCnt\":" + answer
+                + ",\"lowQualityCount\":" + lowQuality + ",\"unanswerCnt\":" + unanswer + "}";
     }
 
     private String updateBody(String answer) {

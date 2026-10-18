@@ -1,0 +1,8 @@
+**
+!Dockerfile.ai
+!requirements-api.txt
+!requirements-runtime.txt
+!services/
+!services/*.py
+!dataset/
+!dataset/answer_templates.json

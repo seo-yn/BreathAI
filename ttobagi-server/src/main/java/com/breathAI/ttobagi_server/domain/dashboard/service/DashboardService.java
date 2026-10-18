@@ -29,10 +29,17 @@ import java.io.IOException;
 import java.util.Optional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.TreeMap;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 // 파일 업로드, AI 분석 실행 및 콜백 수신, 대시보드 지표 조회
@@ -57,6 +64,7 @@ public class DashboardService {
     private final SurgeStatRepository surgeStatRepository;
     private final PerformanceComparisonRepository performanceComparisonRepository;
     private final StatDateRepository statDateRepository;
+    private final AnalysisDailyStatRepository analysisDailyStatRepository;
     private final ObjectMapper objectMapper;
     private final SseEmitterManager sseEmitterManager;
     private final UploadArchiveService uploadArchiveService;
@@ -136,6 +144,7 @@ public class DashboardService {
                 .systemStatus(commonData.getSystemStatus())
                 .performanceMetrics(commonData.getPerformanceMetrics())
                 .trend(commonData.getTrend())
+                .usageStats(commonData.getUsageStats())
                 .burstKeywords(commonData.getBurstKeywords())
                 .unanswerAnalysis(commonData.getUnanswerAnalysis())
                 .clusteringView(commonData.getClusteringView())
@@ -149,18 +158,28 @@ public class DashboardService {
     private AnalyzeResultResponse buildAnalyzeResultResponse(
         List<AnalysisJob> jobs, LocalDate startDate, LocalDate endDate) {
 
-        // 1. 시스템 상태 - 모든 job의 logs 합산
-        List<ClusterLogMap> allLogs = jobs.stream()
-                .flatMap(job -> clusterLogMapRepository.findAllByCluster_AnalysisJob(job).stream())
-                .collect(Collectors.toList());
-
-        int totalLogCount = allLogs.size();
-        int correctCount = (int) allLogs.stream()
-                .filter(l -> l.getLogType() == ClusterLogMap.LogType.CORRECT).count();
-        int lowQualityCount = (int) allLogs.stream()
-                .filter(l -> l.getLogType() == ClusterLogMap.LogType.LOW_QUALITY).count();
-        int unansweredCount = (int) allLogs.stream()
-                .filter(l -> l.getLogType() == ClusterLogMap.LogType.UNANSWER).count();
+        // 1. 시스템 상태 - AI가 보낸 파일별 건수를 합산한다
+        // 요약값이 없는 예전 분석만 저장된 좌표 수로 센다 (좌표는 군집화된 로그만 있어 전체 건수보다 적을 수 있다)
+        List<ClusterLogMap> allLogs = new ArrayList<>();
+        int totalLogCount = 0;
+        int correctCount = 0;
+        int lowQualityCount = 0;
+        int unansweredCount = 0;
+        for (AnalysisJob job : jobs) {
+            List<ClusterLogMap> logs = clusterLogMapRepository.findAllByCluster_AnalysisJob(job);
+            allLogs.addAll(logs);
+            if (job.hasSummary()) {
+                totalLogCount += job.getTotalLogCount();
+                correctCount += zeroIfNull(job.getCorrectCount());
+                lowQualityCount += zeroIfNull(job.getLowQualityCount());
+                unansweredCount += zeroIfNull(job.getUnanswerCount());
+            } else {
+                totalLogCount += logs.size();
+                correctCount += countLogs(logs, ClusterLogMap.LogType.CORRECT);
+                lowQualityCount += countLogs(logs, ClusterLogMap.LogType.LOW_QUALITY);
+                unansweredCount += countLogs(logs, ClusterLogMap.LogType.UNANSWER);
+            }
+        }
 
         AnalyzeResultResponse.SystemStatus systemStatus = AnalyzeResultResponse.SystemStatus.builder()
                 .totalLogCount(totalLogCount)
@@ -179,7 +198,23 @@ public class DashboardService {
                 .findByAnalysisJob_AnalysisId(latestAnalysisId).orElse(null);
 
         AnalyzeResultResponse.PerformanceMetrics performanceMetrics = null;
-        if (comparison != null) {
+        if (jobs.stream().anyMatch(AnalysisJob::hasSummary)) {
+                // 개선 전 미답변율: 파일 하나면 AI 값을 그대로 쓰고, 여러 파일은 합친 건수로 같은 공식(미답변 ÷ 전체 × 100)을 적용한다
+                double currentUnanswerRate = jobs.size() == 1 && latestJob.getCurrentUnanswerRate() != null
+                        ? latestJob.getCurrentUnanswerRate().doubleValue()
+                        : (totalLogCount > 0 ? Math.round(unansweredCount * 10000.0 / totalLogCount) / 100.0 : 0.0);
+                performanceMetrics = AnalyzeResultResponse.PerformanceMetrics.builder()
+                        .currentUnanswerRate(currentUnanswerRate)
+                        .predictedAccuracyGain(latestJob.getPredictedAccuracyGain() != null
+                                ? latestJob.getPredictedAccuracyGain().doubleValue()
+                                : comparison != null && comparison.getAccuracyGain() != null
+                                        ? comparison.getAccuracyGain().doubleValue() : 0.0)
+                        .resolvedCountByAI(latestJob.getResolvedCountByAi() != null
+                                ? latestJob.getResolvedCountByAi()
+                                : comparison != null && comparison.getResolvedCountByAi() != null
+                                        ? comparison.getResolvedCountByAi() : 0)
+                        .build();
+        } else if (comparison != null) {
                 performanceMetrics = AnalyzeResultResponse.PerformanceMetrics.builder()
                         .currentUnanswerRate(comparison.getAfterUnanswerRate() != null
                                 ? comparison.getAfterUnanswerRate().doubleValue() : 0.0)
@@ -190,17 +225,32 @@ public class DashboardService {
                         .build();
         }
 
-        // 3. 트렌드
-        List<UsageStat> usageStats = (startDate != null && endDate != null)
-                ? usageStatRepository.findByStatDateBetween(startDate, endDate)
-                : List.of();
-        List<AnalyzeResultResponse.TrendItem> trend = usageStats.stream()
-                .map(s -> AnalyzeResultResponse.TrendItem.builder()
-                        .date(s.getStatDate().getStatDate().toString())
-                        .unanswerCount(s.getUnanswerCnt())
-                        .lowQualityCount(s.getLowQualityCount())
-                        .build())
-                .collect(Collectors.toList());
+        // 3. 트렌드·날짜별 통계 - 파일별 날짜 통계를 날짜마다 합산한다
+        List<AnalysisDailyStat> dailyStats = analysisDailyStatRepository.findByAnalysisJob_AnalysisIdInOrderByStatDateAsc(
+                jobs.stream().map(AnalysisJob::getAnalysisId).toList());
+        List<AnalyzeResultResponse.UsageStatItem> usageStatItems = sumDailyStats(dailyStats);
+        List<AnalyzeResultResponse.TrendItem> trend;
+        if (!dailyStats.isEmpty()) {
+                trend = usageStatItems.stream()
+                        .map(s -> AnalyzeResultResponse.TrendItem.builder()
+                                .date(s.getStatDate())
+                                .unanswerCount(s.getUnanswerCnt())
+                                .lowQualityCount(s.getLowQualityCount())
+                                .build())
+                        .collect(Collectors.toList());
+        } else {
+                // 파일별 통계가 생기기 전 분석은 예전처럼 공용 사용량 테이블에서 읽는다
+                List<UsageStat> usageStats = (startDate != null && endDate != null)
+                        ? usageStatRepository.findByStatDateBetween(startDate, endDate)
+                        : List.of();
+                trend = usageStats.stream()
+                        .map(s -> AnalyzeResultResponse.TrendItem.builder()
+                                .date(s.getStatDate().getStatDate().toString())
+                                .unanswerCount(s.getUnanswerCnt())
+                                .lowQualityCount(s.getLowQualityCount())
+                                .build())
+                        .collect(Collectors.toList());
+        }
 
         // 4. 급증 키워드 - 모든 job 합산
         List<SurgeDetection> surgeDetections = jobs.stream()
@@ -316,6 +366,7 @@ public class DashboardService {
                 .systemStatus(systemStatus)
                 .performanceMetrics(performanceMetrics)
                 .trend(trend)
+                .usageStats(usageStatItems)
                 .burstKeywords(burstKeywords)
                 .unanswerAnalysis(unansweredAnalysis)
                 .clusteringView(clusteringView)
@@ -546,35 +597,10 @@ public class DashboardService {
         }
 
         // COMPLETED: 전체 데이터 적재
-        // 1. 사용량 통계 적재
-        if (request.getTrend() != null) {
-                for (AnalysisCallbackRequest.TrendItemResult trendItem : request.getTrend()) {
-                    LocalDate statDate = parseTrendDate(trendItem.getDate(), analysisJob);
-            
-                    StatDate statDateEntity = statDateRepository.findById(statDate)
-                            .orElseGet(() -> statDateRepository.save(
-                                    StatDate.builder().statDate(statDate).build()));
-            
-                    UsageStat usageStatEntity = usageStatRepository
-                            .findByStatDate_StatDate(statDate)
-                            .orElse(UsageStat.builder()
-                                    .statDate(statDateEntity)
-                                    .totalCnt(0)
-                                    .answerCnt(0)
-                                    .lowQualityCount(0)
-                                    .unanswerCnt(0)
-                                    .build());
-            
-                    // total_cnt와 answer_cnt는 bronze_chatting_log_day 집계가 필요하나
-                    // 현재 해당 데이터가 적재되지 않아 0으로 둔다 (사용량 통계 기능 보류 중)
-                    usageStatEntity.update(
-                            0,
-                            0,
-                            trendItem.getLowQualityCount() != null ? trendItem.getLowQualityCount() : 0,
-                            trendItem.getUnanswerCount() != null ? trendItem.getUnanswerCount() : 0);
-                    usageStatRepository.save(usageStatEntity);
-                }
-            }
+        // 1. 업로드 파일별 요약값과 날짜 통계 적재
+        // 업로드 파일 범위의 값이라 서비스 전체 사용량(gold_usage_stat)에는 쓰지 않는다
+        saveAnalysisSummary(analysisJob, request);
+        saveDailyStats(analysisJob, request);
 
         // 2. 클러스터링 결과 적재
         if (request.getClusteringView() != null && request.getClusteringView().getClusterNames() != null) {
@@ -841,6 +867,91 @@ public class DashboardService {
             case COMPLETED -> "분석이 완료되었습니다.";
             case FAIL -> "분석에 실패했습니다.";
         };
+    }
+
+    // AI가 보낸 파일별 요약값 저장, 보내지 않았으면 비워 두고 조회 시 기존 방식으로 계산한다
+    // 합계가 맞지 않아도 분석이 끝나지 않는 일이 없도록 거절하지 않고 경고만 남긴다
+    private void saveAnalysisSummary(AnalysisJob analysisJob, AnalysisCallbackRequest request) {
+        AnalysisCallbackRequest.SystemStatusResult system = request.getSystemStatus();
+        AnalysisCallbackRequest.PerformanceMetricsResult metrics = request.getPerformanceMetrics();
+        if (system == null || system.getTotalLogCount() == null) {
+            return;
+        }
+        AnalysisCallbackRequest.SystemStatusResult.SamplingStatusResult sampling = system.getSamplingStatus();
+        Integer correct = sampling != null ? sampling.getCorrect() : null;
+        Integer lowQuality = sampling != null ? sampling.getLowQuality() : null;
+        Integer unanswer = sampling != null ? sampling.getUnanswer() : null;
+        if (zeroIfNull(correct) + zeroIfNull(lowQuality) + zeroIfNull(unanswer) != system.getTotalLogCount()) {
+            log.warn("요약값 합계 불일치: analysisId={}, total={}, correct={}, lowQuality={}, unanswer={}",
+                    analysisJob.getAnalysisId(), system.getTotalLogCount(), correct, lowQuality, unanswer);
+        }
+        analysisJob.recordSummary(system.getTotalLogCount(), correct, lowQuality, unanswer,
+                metrics != null ? toPercent(metrics.getCurrentUnanswerRate()) : null,
+                metrics != null ? toPercent(metrics.getPredictedAccuracyGain()) : null,
+                metrics != null ? metrics.getResolvedCountByAI() : null);
+    }
+
+    // 파일별 날짜 통계 저장, usageStats가 없는 예전 형식은 trend로 저품질·미답변 건수만 채운다
+    // 같은 날짜가 두 번 오면 나중 값을 쓴다 (분석 ID·날짜는 하나만 저장된다)
+    private void saveDailyStats(AnalysisJob analysisJob, AnalysisCallbackRequest request) {
+        Map<LocalDate, AnalysisDailyStat> byDate = new LinkedHashMap<>();
+        if (request.getUsageStats() != null && !request.getUsageStats().isEmpty()) {
+            for (AnalysisCallbackRequest.UsageStatResult usage : request.getUsageStats()) {
+                LocalDate statDate = parseTrendDate(usage.getStatDate(), analysisJob);
+                byDate.put(statDate, AnalysisDailyStat.builder()
+                        .analysisJob(analysisJob)
+                        .statDate(statDate)
+                        .totalCnt(usage.getTotalCnt())
+                        .answerCnt(usage.getAnswerCnt())
+                        .lowQualityCount(usage.getLowQualityCount())
+                        .unanswerCnt(usage.getUnanswerCnt())
+                        .build());
+            }
+        } else if (request.getTrend() != null) {
+            for (AnalysisCallbackRequest.TrendItemResult trendItem : request.getTrend()) {
+                LocalDate statDate = parseTrendDate(trendItem.getDate(), analysisJob);
+                byDate.put(statDate, AnalysisDailyStat.builder()
+                        .analysisJob(analysisJob)
+                        .statDate(statDate)
+                        .lowQualityCount(trendItem.getLowQualityCount())
+                        .unanswerCnt(trendItem.getUnanswerCount())
+                        .build());
+            }
+        }
+        analysisDailyStatRepository.saveAll(byDate.values());
+    }
+
+    // 파일별 날짜 통계를 날짜마다 합산, 전체·정상 건수는 값이 있는 것만 더하고 하나도 없으면 null
+    private List<AnalyzeResultResponse.UsageStatItem> sumDailyStats(List<AnalysisDailyStat> dailyStats) {
+        Map<LocalDate, List<AnalysisDailyStat>> byDate = dailyStats.stream()
+                .collect(Collectors.groupingBy(AnalysisDailyStat::getStatDate, TreeMap::new, Collectors.toList()));
+        return byDate.entrySet().stream()
+                .map(e -> AnalyzeResultResponse.UsageStatItem.builder()
+                        .statDate(e.getKey().toString())
+                        .totalCnt(sumNullable(e.getValue(), AnalysisDailyStat::getTotalCnt))
+                        .answerCnt(sumNullable(e.getValue(), AnalysisDailyStat::getAnswerCnt))
+                        .lowQualityCount(e.getValue().stream().mapToInt(AnalysisDailyStat::getLowQualityCount).sum())
+                        .unanswerCnt(e.getValue().stream().mapToInt(AnalysisDailyStat::getUnanswerCnt).sum())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    private Integer sumNullable(List<AnalysisDailyStat> stats, Function<AnalysisDailyStat, Integer> getter) {
+        List<Integer> values = stats.stream().map(getter).filter(Objects::nonNull).toList();
+        return values.isEmpty() ? null : values.stream().mapToInt(Integer::intValue).sum();
+    }
+
+    // AI는 백분율을 소수 6자리까지 보내므로 저장 칸(소수 2자리)에 맞춰 반올림한다
+    private BigDecimal toPercent(Double value) {
+        return value != null ? BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP) : null;
+    }
+
+    private int countLogs(List<ClusterLogMap> logs, ClusterLogMap.LogType type) {
+        return (int) logs.stream().filter(l -> l.getLogType() == type).count();
+    }
+
+    private int zeroIfNull(Integer value) {
+        return value != null ? value : 0;
     }
 
     // 분석 기간 표시, 기간이 없으면 null이고 한쪽만 있으면 그쪽만 쓴다

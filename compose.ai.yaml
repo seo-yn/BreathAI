@@ -1,0 +1,48 @@
+# For a Linux Docker host/VM with NVIDIA Container Toolkit, not nested Docker on Vast.
+services:
+  api:
+    image: ${AI_API_IMAGE:-breathai-api:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.ai
+      target: api
+    command: ["api"]
+    env_file: [.env.ai]
+    environment:
+      TTOBAGI_JOB_ROOT: /data/jobs
+    volumes:
+      - ai-data:/data
+    ports:
+      - "${AI_BIND_ADDRESS:-127.0.0.1}:${AI_PORT:-8000}:8000"
+    restart: unless-stopped
+    stop_grace_period: 40s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  worker:
+    image: ${AI_GPU_IMAGE:-breathai-gpu:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.ai
+      target: gpu
+    command: ["worker"]
+    env_file: [.env.ai]
+    environment:
+      TTOBAGI_JOB_ROOT: /data/jobs
+    volumes:
+      - ai-data:/data
+      - ${AI_SOURCE_DIR:?Set AI_SOURCE_DIR to the FAQ source directory}:/data/sources:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Do not restart an interrupted GPU job without reconciling its state.
+    restart: "no"
+    stop_grace_period: 40s
+volumes:
+  ai-data:
