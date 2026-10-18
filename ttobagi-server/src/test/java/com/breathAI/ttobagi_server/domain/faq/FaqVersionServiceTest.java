@@ -23,6 +23,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -32,8 +33,9 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.*;
 
 // FAQ 버전 생성과 조회 검증
-// 실제 DB에 연결해 실행하지만 테스트가 끝나면 모두 롤백된다
+// 테스트 전용 DB(Testcontainers)에서 실행하고 테스트가 끝나면 모두 롤백된다
 @SpringBootTest
+@ActiveProfiles("test")
 @Transactional
 class FaqVersionServiceTest {
 
