@@ -158,15 +158,16 @@ min_samples=None)` 형태로 인자화하고 `run_pipeline`에서 넘겨주시�
 ## ③ CORS 허용 오리진 등록 (배포 필수)
 
 프론트엔드를 GitHub Pages로 배포합니다. 배포 주소가 확정됐습니다.
+(레포가 `seo-yn/BreathAI` → `yujin110/BreathAI`로 이전되어 주소가 바뀌었습니다.)
 
 ```
-https://seo-yn.github.io/BreathAI/
+https://yujin110.github.io/BreathAI/
 ```
 
 `CORS_ALLOWED_ORIGINS`에 **경로를 뺀 오리진만** 넣어주세요. 로컬 개발용 주소도 함께 필요합니다.
 
 ```
-CORS_ALLOWED_ORIGINS = https://seo-yn.github.io,http://localhost:5173
+CORS_ALLOWED_ORIGINS=https://yujin110.github.io,http://localhost:5173
 ```
 
 현재 두 오리진 모두 preflight가 403으로 거부됩니다. `SecurityConfig`가
