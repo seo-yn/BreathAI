@@ -1,0 +1,4 @@
+# Keep Linux deployment entry points executable after a Windows checkout.
+deployment/*.sh text eol=lf
+Dockerfile.ai text eol=lf
+.dockerignore text eol=lf

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from services.faq_kb import load_approved_faqs, load_base_kb, merge_kb
+from services.faq_kb import load_approved_faqs, load_base_kb, merge_kb, load_current_kb
 from services.faq_kb import _read_general
 from services.faq_kb import _default_connection_factory
 
@@ -41,6 +41,28 @@ class FakeConnection:
 
 
 class FaqKbTest(unittest.TestCase):
+    def test_db_copies_are_available_when_source_files_are_absent(self):
+        captured = FakeConnection([])
+        load_approved_faqs(lambda: captured, include_source_copies=True)
+        with sqlite3.connect(':memory:') as db:
+            db.executescript('''
+                CREATE TABLE gold_faq (faq_id,source_seq_num,q_type,category,question,answer,keywords,is_active);
+                INSERT INTO gold_faq VALUES (1,100,1,NULL,'seeded','answer','[]',1),
+                                           (2,101,1,NULL,'inactive','answer','[]',0);
+            ''')
+            self.assertEqual([1], [r[0] for r in db.execute(captured.fake_cursor.sql)])
+
+    def test_fallback_only_applies_without_handcrafted_records(self):
+        with patch('services.faq_kb.load_base_kb', return_value=[]), \
+             patch('services.faq_kb.load_handcrafted_faqs') as sources, \
+             patch('services.faq_kb.load_approved_faqs', return_value=[]) as approved:
+            sources.return_value = ([], {})
+            load_current_kb(Path('missing'))
+            approved.assert_called_with(None, include_source_copies=True)
+            sources.return_value = ([{'question': 'original', 'text': 'answer'}], {})
+            load_current_kb(Path('missing'))
+            approved.assert_called_with(None, include_source_copies=False)
+
     def test_explicit_env_file_uses_shared_db_settings(self):
         with patch.dict("os.environ", {"TTOBAGI_DB_ENV_FILE": "ttobagi-server/.env"}), \
                 patch("services.bronze_faq_ingest.connect_db") as connect:

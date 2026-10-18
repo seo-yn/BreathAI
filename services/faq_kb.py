@@ -127,6 +127,7 @@ def _faq_to_kb_record(row: dict) -> dict:
 
 def load_approved_faqs(
     connection_factory: ConnectionFactory | None = None,
+    *, include_source_copies: bool = False,
 ) -> list[dict]:
     """`gold_faq`에서 활성화된 운영 승인 FAQ를 읽는다.
 
@@ -134,22 +135,26 @@ def load_approved_faqs(
     keywords. 비활성 FAQ와 질문/답변이 비어 있는 행은 검색에서 제외한다.
     기존 FAQ를 복사한 행은 수정 이력이 있을 때만 읽는다. 수정하지 않은
     복사본은 원천 파일에서 이미 읽으므로 중복으로 추가하지 않는다.
+    원천 FAQ가 없는 배포에서는 include_source_copies=True로 활성 복사본도 읽는다.
     """
     factory = connection_factory or _default_connection_factory
     conn = factory()
     try:
         with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT f.faq_id, f.source_seq_num, f.q_type, f.category,
-                       f.question, f.answer, f.keywords
-                FROM gold_faq f
-                WHERE f.is_active = 1
+            source_filter = "" if include_source_copies else """
                   AND (f.source_seq_num IS NULL
                        OR EXISTS (
                            SELECT 1 FROM gold_faq_edit_history h
                            WHERE h.faq_id = f.faq_id
                        ))
+            """
+            cursor.execute(
+                f"""
+                SELECT f.faq_id, f.source_seq_num, f.q_type, f.category,
+                       f.question, f.answer, f.keywords
+                FROM gold_faq f
+                WHERE f.is_active = 1
+                  {source_filter}
                 ORDER BY f.faq_id
                 """
             )
@@ -372,7 +377,9 @@ def load_current_kb(
     """
     base = load_base_kb(base_path)
     handcrafted, source_counts = load_handcrafted_faqs(general_path, counselling_path)
-    approved = load_approved_faqs(connection_factory)
+    # A slim deployment may contain neither source file. In that case the
+    # seeded active DB copies are the only available existing FAQ source.
+    approved = load_approved_faqs(connection_factory, include_source_copies=not handcrafted)
     merged = merge_kb(base + handcrafted, approved)
     return merged, {
         "base": len(base),
