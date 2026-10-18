@@ -53,7 +53,7 @@ FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 | (위 동작) | 없음 | 업로드한 원본은 Object Storage에 보관하고 위치를 DB에 기록한다. 응답에는 영향이 없다 | 2026-10-18 |
 | `POST /dashboard/analyze/callback/{analysisId}` | 인증 없음, 응답 `status` 201 | AI 서버 전용. **`Authorization: Bearer <TTOBAGI_CALLBACK_TOKEN>` 필요**(없거나 틀리면 401). 응답은 HTTP·본문 모두 200. AI 서버가 응답 코드를 어떻게 판단하는지(재전송 등) 확인하기 전이라 명세의 201로 바꾸지 않는다. 본문 형식은 [5. BE↔AI](#5-beai-연동-명세에-없음) 참고 | 2026-10-18 |
 | `GET /dashboard/analyze/{analysisId}` | `progress`(선택) | `progress`는 항상 `null`(AI가 진행률을 보내지 않음). 없는 분석은 404 | |
-| `GET /dashboard/analyze/stream/{analysisId}` | `event:status`, `data:{status, message}` | 같다. 단 **토큰이 필요**하다. 브라우저 기본 `EventSource`는 헤더를 못 붙이므로 헤더를 붙일 수 있는 방식으로 연결해야 한다. 연결하자마자 현재 상태를 한 번 보내고, **20초마다 빈 신호(SSE 주석 `:heartbeat`)**를 보낸다. 완료·실패한 분석은 상태를 보내고 바로 끝낸다. 연결은 최대 1시간. 같은 분석을 여러 명이 동시에 구독할 수 있다 | 2026-10-17 |
+| `GET /dashboard/analyze/stream/{analysisId}` | `event:status`, `data:{status, message}` | 같다. 단 **토큰이 필요**하다. 브라우저 기본 `EventSource`는 헤더를 못 붙이므로 헤더를 붙일 수 있는 방식으로 연결해야 한다. 연결하자마자 현재 상태를 한 번 보내고, **20초마다 빈 신호(SSE 주석 `:heartbeat`)**를 보낸다. 완료·실패한 분석은 상태를 보내고 바로 끝낸다. 연결은 **최대 8시간**(분석이 오래 걸리므로 2026-10-18에 1시간에서 늘림). 그 전에 끊기면 다시 연결하면 되고, 다시 연결하면 현재 상태부터 받는다. 같은 분석을 여러 명이 동시에 구독할 수 있다 | 2026-10-18 |
 | `GET /dashboard/analyze/history` | — | `page`(기본 0), `size`(기본 10). `period`는 기간이 있으면 `"2026-08-01 ~ 2026-08-31"`, 시작일만 있으면 `"2026-08-01 ~"`, 종료일만 있으면 `"~ 2026-08-31"`, 둘 다 없으면 `null` | 2026-10-18 |
 
 ## 4. faq
