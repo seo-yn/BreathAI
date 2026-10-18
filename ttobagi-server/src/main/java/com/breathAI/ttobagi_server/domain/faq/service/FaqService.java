@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 // 운영 FAQ 관리 및 AI 생성 FAQ 후보 반영 처리
@@ -158,9 +159,11 @@ public class FaqService {
         String beforeQuestion = faq.getQuestion();
         String beforeAnswer = faq.getAnswer();
         List<String> beforeKeywords = parseKeywords(faq.getKeywords());
+        Integer beforeQType = faq.getQType();
 
         faq.update(request.getStandardQuestion(), request.getAnswer(),
                 toKeywordsJson(request.getKeywords()), request.getQType());
+        syncCategory(faq, beforeQType);
         // 수정 시각이 응답에 반영되도록 즉시 반영한다
         faqRepository.saveAndFlush(faq);
 
@@ -329,19 +332,25 @@ public class FaqService {
             if (request.getKeywords() != null) {
                 mergedKeywords.addAll(request.getKeywords());
             }
+            Integer beforeQType = targetFaq.getQType();
             targetFaq.update(request.getFinalQuestion(), request.getFinalAnswer(),
                     toKeywordsJson(new ArrayList<>(mergedKeywords)), request.getQType());
+            syncCategory(targetFaq, beforeQType);
             // 수정 시각이 응답에 반영되도록 즉시 반영한다
             appliedFaq = faqRepository.saveAndFlush(targetFaq);
         } else {
+            // 운영자가 카테고리 코드를 지정하지 않으면 후보의 값을 따르고, 바꾸면 카테고리 이름도 마스터에서 다시 찾는다
+            Integer qType = request.getQType() != null ? request.getQType() : candidate.getQType();
+            String category = Objects.equals(qType, candidate.getQType())
+                    ? candidate.getCategory()
+                    : faqRepository.findCategoryNameByQType(qType).orElse(null);
             appliedFaq = faqRepository.save(Faq.builder()
                     .candidate(candidate)
                     .question(request.getFinalQuestion())
                     .answer(request.getFinalAnswer())
                     .keywords(toKeywordsJson(request.getKeywords()))
-                    // 운영자가 카테고리 코드를 지정하지 않으면 후보의 값을 따른다
-                    .qType(request.getQType() != null ? request.getQType() : candidate.getQType())
-                    .category(candidate.getCategory())
+                    .qType(qType)
+                    .category(category)
                     .createdBy(user)
                     .build());
         }
@@ -441,6 +450,15 @@ public class FaqService {
                 .matchedFaqs(matchedFaqs)
                 .createdAt(candidate.getCreatedAt())
                 .build();
+    }
+
+    // 카테고리 코드가 바뀌었을 때만 표시명을 마스터 기준으로 맞춘다 (마스터에 없는 코드면 비운다)
+    // 같은 코드로 다시 저장할 때 마스터에 없는 옛 코드의 카테고리가 지워지지 않게 한다
+    private void syncCategory(Faq faq, Integer beforeQType) {
+        if (Objects.equals(beforeQType, faq.getQType())) {
+            return;
+        }
+        faq.changeCategory(faqRepository.findCategoryNameByQType(faq.getQType()).orElse(null));
     }
 
     // 키워드 리스트를 저장용 JSON 문자열로 변환, 없거나 실패하면 null

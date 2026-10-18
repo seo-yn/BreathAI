@@ -27,7 +27,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 // 계정 관련 API
-// SecurityConfig에서 /api/v1/auth/** 전체가 permitAll이므로 인증 없이 접근 가능
+// 가입·로그인·로그아웃·재발급·재설정 요청·재설정 확정만 인증 없이 접근 가능 (SecurityConfig)
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
@@ -39,8 +39,9 @@ public class AuthController {
     @PostMapping("/signup")
     public ResponseEntity<ApiResponse<Void>> signup(@RequestBody @Valid SignupRequest request) {
         authService.signUp(request);
+        // 본문 status도 HTTP 상태와 같은 201로 맞춘다
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success(null));
+                .body(new ApiResponse<>(true, "요청에 성공하였습니다.", null, HttpStatus.CREATED.value()));
     }
 
     // 로그인, 액세스·리프레시 토큰 발급

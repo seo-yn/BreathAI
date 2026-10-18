@@ -73,7 +73,7 @@ public class SecurityConfig {
                        if (response.isCommitted()) return;
                        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                        response.setContentType("application/json;charset=UTF-8");
-                       response.getWriter().write("{\"message\": \"ADMIN 계정만 접근 가능합니다.\"}");
+                       response.getWriter().write("{\"success\":false,\"message\":\"ADMIN 계정만 접근 가능합니다.\",\"status\":403}");
                 })
             )
             .authorizeHttpRequests(authz -> authz

@@ -69,6 +69,16 @@ chmod 600 .env
 | `TTOBAGI_AI_SERVER` | `http://host.docker.internal:18000` (SSH 터널 주소) |
 | `TTOBAGI_AI_API_TOKEN`, `TTOBAGI_CALLBACK_TOKEN` | AI 서버와 같은 값 |
 | `CORS_ALLOWED_ORIGINS` | FE 주소 (예: `https://아이디.github.io`) |
+| `TTOBAGI_STORAGE_ENABLED` | `true`면 업로드 원본을 Object Storage에 보관 (아래 7번) |
+| `TTOBAGI_STORAGE_ACCESS_KEY`, `TTOBAGI_STORAGE_SECRET_KEY` | Object Storage 권한만 있는 Sub Account의 API 인증키 |
+| `TTOBAGI_STORAGE_UPLOAD_BUCKET`, `TTOBAGI_STORAGE_BACKUP_BUCKET` | `breathai-uploads`, `breathai-backup` |
+
+키는 화면과 명령 기록에 남지 않게 입력받아 넣는다.
+
+```bash
+read -rp "Access Key ID: " AK; read -rsp "Secret Key: " SK; echo
+# 이어서 .env에 TTOBAGI_STORAGE_ACCESS_KEY="$AK", TTOBAGI_STORAGE_SECRET_KEY="$SK"를 기록하고 unset AK SK
+```
 
 ## 4. 실행
 
@@ -120,6 +130,7 @@ systemctl list-timers | grep certbot      # snap.certbot.renew.timer
 ## 6. DB 백업
 
 매일 04:00에 압축 덤프를 `/var/backups/breathai`에 남기고 14일 지난 것은 지운다.
+`.env`에 Object Storage 키가 있으면 `breathai-backup` 버킷의 `db/`에도 올린다(버킷 수명 주기로 30일 뒤 자동 삭제).
 
 ```bash
 install -m 700 /opt/breathai/ttobagi-server/deploy/backup/breathai-db-backup.sh /usr/local/bin/breathai-db-backup.sh
@@ -127,16 +138,29 @@ echo '0 4 * * * root /usr/local/bin/breathai-db-backup.sh >> /var/log/breathai-d
 /usr/local/bin/breathai-db-backup.sh && ls -l /var/backups/breathai/
 ```
 
-백업이 같은 서버에 있으므로 서버 자체가 없어지면 함께 없어진다.
+업로드에는 AWS CLI 공식 도커 이미지(`amazon/aws-cli:2.22.35`)를 쓴다. 서버에 따로 설치하지 않는다.
 
-## 7. 업데이트
+## 7. Object Storage
+
+| 버킷 | 내용 | 수명 주기 |
+|---|---|---|
+| `breathai-uploads` | 분석 업로드 원본 `uploads/연/월/업로드ID.확장자` | 90일 뒤 삭제 |
+| `breathai-backup` | DB 백업 `db/ttobagi_db_날짜_시각.sql.gz` | 30일 뒤 삭제 |
+
+- 둘 다 비공개, 잠금·암호화·버전 관리는 쓰지 않는다.
+- 업로드 원본은 xlsx·csv 그대로(변환 전) 보관하고, 위치를 `gold_upload_file.file_path`에 `s3://버킷/키`로 기록한다.
+- 보관에 실패해도 분석은 그대로 진행한다(서버 로그에 경고).
+- 수명 주기로 지워진 뒤에도 `file_path`는 남는다. 위치 기록일 뿐 파일이 남아 있다는 뜻은 아니다.
+- 인증키는 Sub Account(`NCP_OBJECT_STORAGE_MANAGER` 정책만)로 만든다. Sub Account의 접근 Source 제한은 Object Storage에 적용되지 않는다.
+
+## 8. 업데이트
 
 ```bash
 cd /opt/breathai && git pull
 cd ttobagi-server && docker compose -f docker-compose.prod.yml up -d --build --wait app
 ```
 
-## 8. 겪은 문제
+## 9. 겪은 문제
 
 | 증상 | 원인 | 해결 |
 |---|---|---|

@@ -115,6 +115,11 @@ public class Faq {
         if (qType != null) this.qType = qType;
     }
 
+    // 카테고리 표시명 변경 (카테고리 코드가 바뀔 때 함께 맞춘다)
+    public void changeCategory(String category) {
+        this.category = category;
+    }
+
     // 비활성 처리 (soft delete)
     public void deactivate() {
         this.isActive = false;

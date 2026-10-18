@@ -59,6 +59,7 @@ public class DashboardService {
     private final StatDateRepository statDateRepository;
     private final ObjectMapper objectMapper;
     private final SseEmitterManager sseEmitterManager;
+    private final UploadArchiveService uploadArchiveService;
 
     // 월 단위 챗봇 사용량 조회, 전월 대비 증가율 포함
     @Transactional(readOnly = true)
@@ -398,6 +399,8 @@ public class DashboardService {
                 .build();
         analysisJobRepository.save(analysisJob);
         Long analysisId = analysisJob.getAnalysisId();
+        // 실패 파일 재분석처럼 같은 업로드 기록을 다시 쓰는 경우 원본은 이미 보관돼 있다
+        boolean alreadyArchived = uploadFile.getFilePath() != null && !uploadFile.getFilePath().isBlank();
 
         // 분석 기록이 커밋된 뒤에 요청해야 실패 처리와 AI 콜백이 기록을 찾을 수 있다
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -413,6 +416,10 @@ public class DashboardService {
                         periodStartDate != null ? periodStartDate : "",
                         periodEndDate != null ? periodEndDate : "",
                         () -> markPipelineRequestFailed(analysisId));
+                if (!alreadyArchived) {
+                    // 변환 전 원본을 그대로 보관한다 (xlsx는 xlsx로)
+                    uploadArchiveService.archive(uploadId, fileBytes, originalFileName);
+                }
             }
         });
 
@@ -485,7 +492,7 @@ public class DashboardService {
                         .analysisId(job.getAnalysisId())
                         .fileName(job.getFileName())
                         .status(job.getStatus().name())
-                        .period(job.getPeriodStartDate() + " ~ " + job.getPeriodEndDate())
+                        .period(formatPeriod(job.getPeriodStartDate(), job.getPeriodEndDate()))
                         .submittedAt(job.getCreatedAt())
                         .build())
                 .collect(Collectors.toList());
@@ -834,6 +841,14 @@ public class DashboardService {
             case COMPLETED -> "분석이 완료되었습니다.";
             case FAIL -> "분석에 실패했습니다.";
         };
+    }
+
+    // 분석 기간 표시, 기간이 없으면 null이고 한쪽만 있으면 그쪽만 쓴다
+    private String formatPeriod(LocalDate start, LocalDate end) {
+        if (start == null && end == null) return null;
+        if (start == null) return "~ " + end;
+        if (end == null) return start + " ~";
+        return start + " ~ " + end;
     }
 
     // 콜백 트렌드 날짜 파싱

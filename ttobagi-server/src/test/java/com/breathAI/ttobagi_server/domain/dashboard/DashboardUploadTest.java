@@ -7,6 +7,7 @@ import com.breathAI.ttobagi_server.domain.dashboard.repository.AnalysisJobReposi
 import com.breathAI.ttobagi_server.domain.dashboard.repository.UploadFileRepository;
 import com.breathAI.ttobagi_server.domain.dashboard.service.AnalysisUploadReader;
 import com.breathAI.ttobagi_server.domain.dashboard.service.DashboardService;
+import com.breathAI.ttobagi_server.domain.dashboard.service.UploadArchiveService;
 import com.breathAI.ttobagi_server.global.exception.CustomException;
 import com.breathAI.ttobagi_server.global.util.WebClientUtil;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -36,6 +37,7 @@ class DashboardUploadTest {
     @Mock UploadFileRepository uploads;
     @Mock AnalysisJobRepository jobs;
     @Mock WebClientUtil client;
+    @Mock UploadArchiveService archive;
     @Spy AnalysisUploadReader reader = new AnalysisUploadReader();
     @InjectMocks DashboardService service;
 
@@ -82,5 +84,7 @@ class DashboardUploadTest {
         var sent = ArgumentCaptor.forClass(byte[].class);
         verify(client).sendPipeline(anyString(), isNull(), sent.capture(), eq("원본.csv"), eq(false), eq(true), eq("2026-01-01"), eq("2026-01-31"), any(Runnable.class));
         assertTrue(new String(sent.getValue(), StandardCharsets.UTF_8).contains("안녕하세요"));
+        // 보관은 AI로 보낸 CSV가 아니라 변환 전 xlsx 원본으로 한다
+        verify(archive).archive(anyString(), eq(bytes), eq("원본.xlsx"));
     }
 }

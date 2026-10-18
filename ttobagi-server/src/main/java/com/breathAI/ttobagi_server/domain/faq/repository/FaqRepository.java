@@ -52,6 +52,12 @@ public interface FaqRepository extends JpaRepository<Faq, Long> {
             nativeQuery = true)
     List<Integer> findQTypesByCategoryName(@Param("name") String name);
 
+    // 카테고리 코드로 표시명 조회, 같은 코드가 여러 번 적재되면 가장 최근 이름을 쓴다 (CSV 다운로드와 같은 규칙)
+    @Query(value = "SELECT q_disp_name FROM bronze_cate_info WHERE q_type = :qType "
+            + "ORDER BY _ingested_at DESC LIMIT 1",
+            nativeQuery = true)
+    Optional<String> findCategoryNameByQType(@Param("qType") Integer qType);
+
     // 원본 FAQ 순번으로 활성 FAQ 단건 조회 (EXPAND 후보의 확장 대상)
     Optional<Faq> findFirstBySourceSeqNumAndIsActiveTrueOrderByFaqIdAsc(Integer sourceSeqNum);
 
