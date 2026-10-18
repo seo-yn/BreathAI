@@ -492,7 +492,7 @@ public class DashboardService {
                         .analysisId(job.getAnalysisId())
                         .fileName(job.getFileName())
                         .status(job.getStatus().name())
-                        .period(job.getPeriodStartDate() + " ~ " + job.getPeriodEndDate())
+                        .period(formatPeriod(job.getPeriodStartDate(), job.getPeriodEndDate()))
                         .submittedAt(job.getCreatedAt())
                         .build())
                 .collect(Collectors.toList());
@@ -841,6 +841,14 @@ public class DashboardService {
             case COMPLETED -> "분석이 완료되었습니다.";
             case FAIL -> "분석에 실패했습니다.";
         };
+    }
+
+    // 분석 기간 표시, 기간이 없으면 null이고 한쪽만 있으면 그쪽만 쓴다
+    private String formatPeriod(LocalDate start, LocalDate end) {
+        if (start == null && end == null) return null;
+        if (start == null) return "~ " + end;
+        if (end == null) return start + " ~";
+        return start + " ~ " + end;
     }
 
     // 콜백 트렌드 날짜 파싱
