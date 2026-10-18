@@ -22,6 +22,7 @@ import os
 import time
 import unicodedata
 from pathlib import Path
+from services.runtime_config import runtime_path
 
 import numpy as np
 import torch
@@ -35,7 +36,7 @@ def _nfd(p: Path) -> Path:
 
 
 # 경로
-DATA_DIR = _nfd(Path(__file__).resolve().parent.parent / 'dataset')
+DATA_DIR = runtime_path('TTOBAGI_DATA_DIR', _nfd(Path(__file__).resolve().parent.parent / 'dataset'))
 KB_JSONL = DATA_DIR / 'seoulmetro_kb_clean.jsonl'
 KB_EMB = DATA_DIR / 'kb_embeddings.npy'
 KB_EMB_META = DATA_DIR / 'kb_embeddings.meta.json'
