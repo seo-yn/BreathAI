@@ -570,8 +570,8 @@ export default function AnalyzePage() {
               <div style={S.cardBody}>
                 {[
                   { label: "총 로그 수", value: `${analyzeResult?.systemStatus?.totalLogCount?.toLocaleString() || 0}건`, color: "#111827" },
-                  { label: "예상 해소 건수", value: `${analyzeResult?.performanceMetrics?.resolvedCountByAI?.toLocaleString() || 0}건`, color: "#43A047" },
-                  { label: "예상 정확도 향상", value: `+${analyzeResult?.performanceMetrics?.predictedAccuracyGain || 0}%`, color: "#1565C0" },
+                  // "예상 해소 건수"·"예상 정확도 향상"은 BE가 저장값으로 재계산해 신뢰할 수 없어 뺐다
+                  // (api-spec-changes.md 7절 결정 대기). 확정되면 되살린다.
                   { label: "FAQ 후보 생성 수", value: `${candidates.length}개`, color: "#1565C0" },
                 ].map((r) => (
                   <div key={r.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #F3F4F6", fontSize: 13 }}>

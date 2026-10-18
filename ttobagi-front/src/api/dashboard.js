@@ -2,6 +2,8 @@ import { request, getStoredTokens, BASE_URL } from "./client.js";
 
 export const dashApi = {
   // GET /api/v1/dashboard/usage?year=2026&month=4
+  // 월 단위 사용량. 대시보드는 분석 결과의 usageStats(파일별 날짜 통계)로 전환해 더 이상 쓰지 않는다.
+  // 엔드포인트는 백엔드에 남아 있어 호출부만 정리했다.
   getUsage: (year, month) => request("GET", `/api/v1/dashboard/usage?year=${year}&month=${month}`),
 
   // POST /api/v1/dashboard/analyze/upload (업로드 + 분석 통합)
