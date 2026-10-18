@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.DynamicInsert;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -66,6 +67,28 @@ public class AnalysisJob {
     @ColumnDefault("0")
     private Boolean isTranslationEnabled;
 
+    // AI가 보낸 업로드 파일별 요약값, 보내지 않은 예전 분석은 비어 있다
+    @Column(name = "total_log_count")
+    private Integer totalLogCount;
+
+    @Column(name = "correct_count")
+    private Integer correctCount;
+
+    @Column(name = "low_quality_count")
+    private Integer lowQualityCount;
+
+    @Column(name = "unanswer_count")
+    private Integer unanswerCount;
+
+    @Column(name = "current_unanswer_rate", precision = 5, scale = 2)
+    private BigDecimal currentUnanswerRate;
+
+    @Column(name = "predicted_accuracy_gain", precision = 5, scale = 2)
+    private BigDecimal predictedAccuracyGain;
+
+    @Column(name = "resolved_count_by_ai")
+    private Integer resolvedCountByAi;
+
     public enum Status {
         PENDING, PREPROCESSING, ANALYZING, COMPLETED, FAIL
     }
@@ -113,6 +136,23 @@ public class AnalysisJob {
         this.status = Status.FAIL;
         this.errorMessage = errorMessage;
         this.finishedAt = LocalDateTime.now();
+    }
+
+    // AI가 보낸 파일별 요약값 기록, 다시 계산하지 않고 받은 값을 그대로 둔다
+    public void recordSummary(Integer totalLogCount, Integer correctCount, Integer lowQualityCount,
+                              Integer unanswerCount, BigDecimal currentUnanswerRate,
+                              BigDecimal predictedAccuracyGain, Integer resolvedCountByAi) {
+        this.totalLogCount = totalLogCount;
+        this.correctCount = correctCount;
+        this.lowQualityCount = lowQualityCount;
+        this.unanswerCount = unanswerCount;
+        this.currentUnanswerRate = currentUnanswerRate;
+        this.predictedAccuracyGain = predictedAccuracyGain;
+        this.resolvedCountByAi = resolvedCountByAi;
+    }
+
+    public boolean hasSummary() {
+        return totalLogCount != null;
     }
 
 }
