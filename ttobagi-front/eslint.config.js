@@ -18,4 +18,10 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
+  {
+    // 설정 파일은 브라우저가 아니라 Node에서 실행된다.
+    // vite.config.js가 process.env(VITE_BASE_PATH)를 읽으므로 Node 전역을 허용한다.
+    files: ['*.config.js', 'vite.config.js', 'eslint.config.js'],
+    languageOptions: { globals: globals.node },
+  },
 ])
