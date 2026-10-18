@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Runtime uploads
+ttobagi-AI/uploads/
+
+# FastAPI / Python cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build / distribution
+build/
+dist/
+*.egg-info/
+
+# Dataset generated outputs
+dataset/backend_payload.json
+dataset/tota24_unanswered_2026Q1.csv
+dataset/preprocessed_full.csv
+dataset/kb_embeddings.npy
+dataset/kb_embeddings.meta.json
+dataset/cate_info.csv
+dataset/counselling_info.csv
+dataset/일반상담.xlsx
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Java / Gradle
+.gradle/
+build/
+out/
+
+# Spring Boot local config
+ttobagi-server/.env

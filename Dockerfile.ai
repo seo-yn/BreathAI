@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm
+FROM ${PYTHON_IMAGE} AS api
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+    TTOBAGI_JOB_ROOT=/data/jobs HF_HOME=/data/cache/huggingface \
+    MPLCONFIGDIR=/data/cache/matplotlib
+WORKDIR /app
+RUN mkdir -p /data/jobs /data/cache/huggingface /data/cache/matplotlib
+COPY requirements-api.txt ./
+RUN python -m pip install --no-cache-dir -r requirements-api.txt && python -m pip check
+COPY services/ ./services/
+COPY dataset/answer_templates.json ./dataset/answer_templates.json
+EXPOSE 8000
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["python", "-m", "services.container_entrypoint"]
+CMD ["api"]
+
+FROM api AS gpu
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cu128
+ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY requirements-runtime.txt ./
+RUN python -m pip install --no-cache-dir torch==2.8.0 --index-url ${TORCH_INDEX} \
+    && python -m pip install --no-cache-dir -r requirements-runtime.txt \
+    && python -m pip check \
+    && python -c "import services.run_pipeline, services.preprocess, services.clustering, services.retriever" \
+    && python -m pip freeze > /app/installed-packages.txt
+CMD ["all"]
