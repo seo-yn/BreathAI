@@ -16,9 +16,13 @@ public class SseEmitterManager {
     // analysisId 기준 구독 중인 연결 목록 (같은 분석을 여러 명이 구독할 수 있다)
     private final Map<Long, Set<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
-    // SSE 연결 생성 및 보관, 타임아웃 1시간
+    // AI 분석이 수십 분에서 몇 시간까지 걸리므로 한 번 연결로 끝까지 받을 수 있게 넉넉히 잡는다
+    // 그래도 끊기면 클라이언트가 다시 연결하고, 연결 시 현재 상태를 바로 보낸다
+    private static final long TIMEOUT_MILLIS = 8 * 60 * 60 * 1000L;
+
+    // SSE 연결 생성 및 보관, 타임아웃 8시간
     public SseEmitter create(Long analysisId) {
-        SseEmitter emitter = new SseEmitter(60 * 60 * 1000L);
+        SseEmitter emitter = new SseEmitter(TIMEOUT_MILLIS);
         // 빈 목록 정리(remove)와 겹쳐도 연결이 사라지지 않도록 추가도 compute 안에서 한다
         emitters.compute(analysisId, (id, set) -> {
             Set<SseEmitter> target = (set != null) ? set : ConcurrentHashMap.newKeySet();
