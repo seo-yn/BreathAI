@@ -5,12 +5,14 @@ import com.breathAI.ttobagi_server.global.exception.CustomException;
 import com.breathAI.ttobagi_server.global.exception.ErrorCode;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.ByteArrayOutputStream;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -54,6 +56,45 @@ class AnalysisUploadReaderTest {
             assertEquals("한글, \"인용\"\n줄바꿈", rows.get(1).get(0));
             assertEquals("", rows.get(1).get(1));
             assertEquals("0012", rows.get(1).get(2));
+        }
+    }
+
+    @Test
+    @DisplayName("엑셀 날짜 칸은 화면 서식과 상관없이 AI가 읽는 ISO 형식으로 바꾼다")
+    void xlsxDatesBecomeIsoRegardlessOfDisplayFormat() throws Exception {
+        byte[] bytes;
+        try (var workbook = new XSSFWorkbook(); var output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet();
+            var header = sheet.createRow(0);
+            String[] names = {"번호", "질문", "날짜", "날짜만", "숫자"};
+            for (int i = 0; i < names.length; i++) {
+                header.createCell(i).setCellValue(names[i]);
+            }
+            var format = workbook.createDataFormat();
+            var dateTimeStyle = workbook.createCellStyle();
+            dateTimeStyle.setDataFormat(format.getFormat("m/d/yy h:mm"));
+            var dateStyle = workbook.createCellStyle();
+            dateStyle.setDataFormat(format.getFormat("m/d/yy"));
+            var row = sheet.createRow(1);
+            row.createCell(0).setCellValue(1);
+            row.createCell(1).setCellValue("질문");
+            var dateTime = row.createCell(2);
+            dateTime.setCellValue(LocalDateTime.of(2026, 8, 27, 12, 4));
+            dateTime.setCellStyle(dateTimeStyle);
+            var dateOnly = row.createCell(3);
+            dateOnly.setCellValue(LocalDateTime.of(2026, 8, 27, 0, 0));
+            dateOnly.setCellStyle(dateStyle);
+            row.createCell(4).setCellValue(3.5);
+            workbook.write(output);
+            bytes = output.toByteArray();
+        }
+        var result = reader.read(new MockMultipartFile("file", "logs.xlsx", null, bytes));
+        try (var csv = CSVFormat.DEFAULT.parse(new StringReader(new String(result.content(), StandardCharsets.UTF_8)))) {
+            var row = csv.getRecords().get(1);
+            assertEquals("1", row.get(0));
+            assertEquals("2026-08-27 12:04:00", row.get(2));
+            assertEquals("2026-08-27", row.get(3));
+            assertEquals("3.5", row.get(4));
         }
     }
 

@@ -82,7 +82,7 @@ class DashboardUploadTest {
         verifyNoInteractions(client);
         TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
         var sent = ArgumentCaptor.forClass(byte[].class);
-        verify(client).sendPipeline(anyString(), isNull(), sent.capture(), eq("원본.csv"), eq(false), eq(true), eq("2026-01-01"), eq("2026-01-31"), any(Runnable.class));
+        verify(client).sendPipeline(anyString(), isNull(), sent.capture(), eq("원본.csv"), eq(false), eq(true), eq("2026-01-01"), eq("2026-01-31"), any());
         assertTrue(new String(sent.getValue(), StandardCharsets.UTF_8).contains("안녕하세요"));
         // 보관은 AI로 보낸 CSV가 아니라 변환 전 xlsx 원본으로 한다
         verify(archive).archive(anyString(), eq(bytes), eq("원본.xlsx"));
