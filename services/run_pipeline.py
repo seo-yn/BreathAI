@@ -308,16 +308,26 @@ def run_full_pipeline() -> None:
     import services.faq_generator as FAQ
     import services.retriever as RET
 
-    _log('=== STAGE 1: preprocess ===')
-    PRE.main()
-    _log('=== STAGE 2: clustering ===')
-    CLU.main()
-    _log('=== STAGE 3: faq_generator ===')
-    FAQ.main()
-    _log('=== STAGE 4: retriever ===')
-    RET.main()
-    _log('=== STAGE 5-8: answer pipeline ===')
-    run_answer_pipeline()
+    for name, operation, progress in (
+        ('1: preprocess', PRE.main, 'PREPROCESSING'),
+        ('2: clustering', CLU.main, 'ANALYZING'),
+        ('3: faq_generator', FAQ.main, None),
+        ('4: retriever', RET.main, None),
+        ('5-8: answer pipeline', run_answer_pipeline, None),
+    ):
+        _log(f'=== STAGE {name} ===')
+        if progress:
+            print(f'TTOBAGI_PROGRESS:{progress}', flush=True)
+        if name == '3: faq_generator':
+            # Discover missing KB/DB configuration before expensive generation.
+            _log('KB preflight: checking retrieval sources before FAQ generation')
+            RET.load_kb()
+        started = time.monotonic()
+        try:
+            operation()
+        finally:
+            # stdout preserves this even when the answer pipeline resets RUN_LOG.
+            _log(f'=== STAGE {name} elapsed={time.monotonic() - started:.1f}s ===')
 
 
 def main() -> None:

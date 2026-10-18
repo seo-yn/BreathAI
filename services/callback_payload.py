@@ -2,6 +2,7 @@
 import csv
 import json
 from pathlib import Path
+from services.dashboard_metrics import build_dashboard
 
 
 def build_callback(job_dir):
@@ -14,10 +15,8 @@ def build_callback(job_dir):
         summaries = {int(row["clusterId"]): row for row in csv.DictReader(file)}
     clusters = []
     for label, row in summaries.items():
-        if label == -1:
-            continue
         words = keywords.get(str(label), [])
-        clusters.append({"clusterLabel": label, "name": ", ".join(words[:3]) or f"클러스터 {label}",
+        clusters.append({"clusterLabel": label, "name": '노이즈' if label == -1 else (", ".join(words[:3]) or f"클러스터 {label}"),
                          "topKeywords": words, "size": int(row["size"])})
     candidates = []
     for candidate in source["faqCandidates"]:
@@ -43,6 +42,7 @@ def build_callback(job_dir):
         if not all(isinstance(mapped[key], str) for key in ("standardQuestion", "answerDraft")):
             raise ValueError("Question and answer must be strings")
         candidates.append(mapped)
-    # CSV logId is not confirmed to be a Bronze primary key. Never invent it.
-    return {"status": "COMPLETED", "faqCandidates": candidates,
-            "clusteringView": {"clusterNames": clusters, "points": []}}
+    dashboard = build_dashboard(data, keywords, summaries)
+    points = dashboard.pop('points')
+    return {"status": "COMPLETED", "faqCandidates": candidates, **dashboard,
+            "clusteringView": {"clusterNames": clusters, "points": points}}

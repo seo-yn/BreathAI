@@ -21,6 +21,24 @@ def load_source(name, filename, dependencies):
 
 
 class PipelineRetrievalTest(unittest.TestCase):
+    def test_empty_kb_stops_before_expensive_generation(self):
+        names = ['answer_regenerator', 'answer_evaluator', 'answer_refiner', 'oos_refresher',
+                 'preprocess', 'clustering', 'faq_generator', 'retriever']
+        deps = {f'services.{name}': types.ModuleType(f'services.{name}') for name in names}
+        deps.update(numpy=types.ModuleType('numpy'), pandas=types.ModuleType('pandas'))
+        for name in ['preprocess', 'clustering', 'faq_generator', 'retriever']:
+            deps[f'services.{name}'].main = Mock()
+        retriever = deps['services.retriever']
+        retriever.load_kb = Mock(side_effect=RuntimeError('empty KB'))
+        with patch.dict(sys.modules, deps):
+            pipeline = load_source('_test_preflight', 'run_pipeline.py', deps)
+            pipeline._ensure_logs = lambda: None
+            pipeline._log = lambda message: None
+            with self.assertRaisesRegex(RuntimeError, 'empty KB'):
+                pipeline.run_full_pipeline()
+        deps['services.faq_generator'].main.assert_not_called()
+        retriever.main.assert_not_called()
+
     def setUp(self):
         self.docs = [dict(chunk_id=f'faq:{i}', page_label=None, text=f'KB evidence {i}',
                           rerank_score=.9 - i * .1) for i in range(5)]

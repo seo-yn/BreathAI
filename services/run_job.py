@@ -57,8 +57,34 @@ def _copy_input(source, target, period_start=None, period_end=None):
             raise ValueError("No input rows in analysis period")
 
 
+def _run_with_progress(command, *, output, on_progress, **options):
+    """Drain stdout while inference runs; no background sender survives the job."""
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          text=True, encoding="utf-8", errors="replace", **options) as process:
+        try:
+            for line in process.stdout:
+                output.write(line)
+                output.flush()
+                status = line.strip().removeprefix("TTOBAGI_PROGRESS:")
+                if line.startswith("TTOBAGI_PROGRESS:") and status in {"PREPROCESSING", "ANALYZING"}:
+                    try:
+                        on_progress(status)
+                    except Exception:
+                        # Progress transport must never fail inference.
+                        print(f"Progress callback failed: {status}", flush=True)
+            return subprocess.CompletedProcess(command, process.wait())
+        except BaseException:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            raise
+
+
 def run_job(input_path, job_dir, *, templates=None, masking=True, translation=False,
-            period_start=None, period_end=None):
+            period_start=None, period_end=None, on_progress=None):
     input_path = Path(input_path).resolve(strict=True)
     templates = Path(templates or ROOT / "dataset/answer_templates.json").resolve(strict=True)
     if not input_path.is_file() or not templates.is_file():
@@ -93,10 +119,11 @@ def run_job(input_path, job_dir, *, templates=None, masking=True, translation=Fa
             shutil.copyfile(source_kb, data_dir / "seoulmetro_kb_clean.jsonl")
         _write_status(job_dir, "RUNNING", masking=masking, translation=translation)
         with (log_dir / "stdout.log").open("w", encoding="utf-8") as output:
-            result = subprocess.run(
+            execute = subprocess.run if on_progress is None else _run_with_progress
+            transport = dict(stdout=output, stderr=subprocess.STDOUT, check=False) if on_progress is None else dict(output=output, on_progress=on_progress)
+            result = execute(
                 [sys.executable, "-u", "-m", "services.run_pipeline", "--full"],
-                cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT,
-                check=False,
+                cwd=ROOT, env=env, **transport,
             )
         final = data_dir / "faq_candidates_final.json"
         if result.returncode:

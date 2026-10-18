@@ -11,6 +11,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 
 from services.job_store import Conflict, JobStore
+from services.dashboard_metrics import read_csv, validate_source_rows
 
 
 def create_app(*, root=None, token=None, max_upload_bytes=50 * 1024 * 1024):
@@ -76,8 +77,9 @@ def create_app(*, root=None, token=None, max_upload_bytes=50 * 1024 * 1024):
                     columns = {column.replace("\n", "") for column in columns}
                     if not {"번호", "질문", "날짜"} <= columns:
                         raise ValueError()
-            except (UnicodeDecodeError, StopIteration, ValueError, csv.Error):
-                raise HTTPException(422, "Expected UTF-8 CSV with 번호, 질문, 날짜 columns") from None
+                validate_source_rows(read_csv(path))
+            except (UnicodeDecodeError, StopIteration, ValueError, csv.Error, KeyError, TypeError, AttributeError):
+                raise HTTPException(422, "Expected UTF-8 CSV with unique INT 번호, 질문, ISO 날짜 and optional valid logType") from None
             created = store.submit(analysisId, digest.hexdigest(), metadata, path)
             keep = created
             return {"analysisId": analysisId, "status": store.get(analysisId)["state"], "duplicate": not created}

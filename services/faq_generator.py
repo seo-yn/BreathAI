@@ -18,7 +18,7 @@ import re
 import time
 import unicodedata
 from pathlib import Path
-from services.runtime_config import runtime_path
+from services.runtime_config import runtime_path, llm_memory_options
 
 import pandas as pd
 import torch
@@ -109,6 +109,7 @@ def load_model() -> tuple:
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME, torch_dtype=DTYPE, device_map='auto', trust_remote_code=True,
+        **llm_memory_options(),
     ).eval()
     return tokenizer, model
 
@@ -120,11 +121,11 @@ def generate(prompt: str, tokenizer, model) -> str:
         {'role': 'user', 'content': prompt},
     ]
     inputs = tokenizer.apply_chat_template(
-        messages, add_generation_prompt=True, return_tensors='pt'
+        messages, add_generation_prompt=True, return_tensors='pt', return_dict=True
     ).to(DEVICE)
 
     out = model.generate(
-        inputs,
+        **inputs,
         max_new_tokens=MAX_NEW_TOKENS,
         temperature=TEMPERATURE,
         top_p=TOP_P,
@@ -132,7 +133,7 @@ def generate(prompt: str, tokenizer, model) -> str:
         eos_token_id=tokenizer.eos_token_id,
         pad_token_id=tokenizer.eos_token_id,
     )
-    response = tokenizer.decode(out[0][inputs.shape[1]:], skip_special_tokens=True)
+    response = tokenizer.decode(out[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
     return response.strip()
 
 

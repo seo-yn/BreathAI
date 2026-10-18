@@ -31,19 +31,38 @@ def worker_lock(root):
         handle.close()
 
 
-def process_one(store, runner=run_job):
+def deliver_progress(store, analysis_id, status, base_url, token, client):
+    if status not in {"PREPROCESSING", "ANALYZING"} or not store.claim_progress(analysis_id, status):
+        return
+    delivery = "UNKNOWN"
+    try:
+        response = client.post(
+            f"{base_url.rstrip('/')}/api/v1/dashboard/analyze/callback/{analysis_id}",
+            json={"status": status}, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+        response.raise_for_status()
+        delivery = "DELIVERED"
+    except Exception:
+        pass  # Ambiguous writes are not retried, just like terminal callbacks.
+    finally:
+        store.finish_progress(analysis_id, status, delivery)
+        print(f"analysis={analysis_id} progress={status} delivery={delivery}", flush=True)
+
+
+def process_one(store, runner=run_job, on_progress=None):
     row = store.claim()
     if not row:
         return False
     metadata = json.loads(row["metadata"])
     job_dir = store.root / f"analysis-{row['id']}"
     try:
+        options = {} if on_progress is None else {"on_progress": lambda status: on_progress(row['id'], status)}
         code = runner(row["input_path"], job_dir, masking=metadata["masking"], translation=metadata["translation"],
-                      period_start=metadata.get("periodStartDate"), period_end=metadata.get("periodEndDate"))
+                      period_start=metadata.get("periodStartDate"), period_end=metadata.get("periodEndDate"), **options)
         if code:
             raise RuntimeError("Pipeline failed; inspect job logs")
         payload = build_callback(job_dir)
     except Exception as exc:
+        print(f"analysis={row['id']} failed errorType={type(exc).__name__} logs={job_dir / 'logs/stdout.log'}", flush=True)
         # Avoid disclosing raw input, DB details, or secrets to callbacks.
         payload = {"status": "FAILED", "errorMessage": f"AI job failed ({type(exc).__name__}); inspect AI logs"}
     store.finish(row["id"], payload)
@@ -69,16 +88,18 @@ def deliver_one(store, base_url, token, client):
 
 
 def main():
-    base = os.environ["TTOBAGI_BE_BASE_URL"]
-    token = os.environ["TTOBAGI_CALLBACK_TOKEN"]
-    if urlparse(base).scheme not in {"http", "https"} or not urlparse(base).netloc or not token:
+    standalone = os.environ.get('TTOBAGI_STANDALONE') == 'true'
+    base = os.environ.get("TTOBAGI_BE_BASE_URL", '')
+    token = os.environ.get("TTOBAGI_CALLBACK_TOKEN", '')
+    if not standalone and (urlparse(base).scheme not in {"http", "https"} or not urlparse(base).netloc or not token):
         raise ValueError("Configure a valid BE URL and callback token")
     store = JobStore(os.environ.get("TTOBAGI_JOB_ROOT", "/data/jobs"))
     with worker_lock(store.root), httpx.Client(timeout=30, follow_redirects=False) as client:
         store.recover_callbacks()
         while True:
-            delivered = deliver_one(store, base, token, client)
-            worked = process_one(store)
+            delivered = False if standalone else deliver_one(store, base, token, client)
+            progress = None if standalone else lambda job_id, status: deliver_progress(store, job_id, status, base, token, client)
+            worked = process_one(store, on_progress=progress)
             if not delivered and not worked:
                 time.sleep(1)
 

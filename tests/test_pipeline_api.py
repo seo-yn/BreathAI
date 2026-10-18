@@ -101,6 +101,15 @@ class PipelineApiTest(unittest.TestCase):
             self.assertEqual(restarted.get("/jobs/1", headers=self.auth).json()["status"], "QUEUED")
         self.assertEqual(len(list((self.root / "uploads").iterdir())), 1)
 
+    def test_invalid_source_ids_dates_and_log_types_rejected_before_queueing(self):
+        for rows in ('1,문의,2026-10-17\n1,다른 문의,2026-10-17\n',
+                     '2147483648,문의,2026-10-17\n', '1,문의,bad-date\n'):
+            response = self.client.post('/pipeline', headers=self.auth,
+                data={'analysisId': '2', 'uploadId': 'invalid'},
+                files={'file': ('input.csv', ('번호,질문,날짜\n' + rows).encode('utf-8'))})
+            self.assertEqual(response.status_code, 422)
+        self.assertIsNone(self.app.state.store.get(2))
+
     def fake_inference(self, source, job, **options):
         self.assertTrue(options["masking"])
         self.assertFalse(options["translation"])
@@ -112,6 +121,12 @@ class PipelineApiTest(unittest.TestCase):
             "topKeywords": ["키워드"], "synonyms": [{"text": "동의어", "type": "SYNONYM"}]}]}), encoding="utf-8")
         (data / "cluster_keywords.json").write_text('{"3": ["키워드"]}', encoding="utf-8")
         (data / "cluster_summary.csv").write_text("clusterId,size,isNoise\n3,5,False\n", encoding="utf-8")
+        (data / 'tota24_unanswered_2026Q1.csv').write_text(
+            '번호,질문,날짜\n' + ''.join(f'{i},문의,2026-10-17\n' for i in range(1, 6)), encoding='utf-8')
+        (data / 'preprocessed_full.csv').write_text(
+            'logId,normalizedForClustering\n' + ''.join(f'{i},문의\n' for i in range(1, 6)), encoding='utf-8')
+        (data / 'clusters.csv').write_text(
+            'logId,clusterId,umap_x,umap_y,text\n' + ''.join(f'{i},3,{i},0,문의\n' for i in range(1, 6)), encoding='utf-8')
         return 0
 
     def test_full_request_to_callback_contract_without_gpu(self):
@@ -133,7 +148,9 @@ class PipelineApiTest(unittest.TestCase):
         self.assertEqual(received[0]["status"], "COMPLETED")
         self.assertEqual(received[0]["faqCandidates"][0]["occurrenceCount"], 5)
         self.assertEqual(received[0]["faqCandidates"][0]["representativeKeywords"], ["키워드"])
-        self.assertEqual(received[0]["clusteringView"]["points"], [])
+        self.assertEqual(len(received[0]["clusteringView"]["points"]), 5)
+        self.assertEqual(received[0]['systemStatus']['totalLogCount'], 5)
+        self.assertEqual(received[0]['performanceMetrics']['currentUnanswerRate'], 100)
         self.assertEqual(store.get(1)["delivery"], "DELIVERED")
 
     def test_failed_inference_and_ambiguous_callback_are_not_retried(self):

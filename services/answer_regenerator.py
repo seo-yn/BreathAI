@@ -23,7 +23,7 @@ import re
 import time
 import unicodedata
 from pathlib import Path
-from services.runtime_config import runtime_path
+from services.runtime_config import runtime_path, llm_memory_options
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -234,6 +234,7 @@ def load_model() -> tuple:
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME, torch_dtype=DTYPE, device_map='auto', trust_remote_code=True,
+        **llm_memory_options(),
     )
     return tokenizer, model
 

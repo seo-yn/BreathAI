@@ -28,7 +28,7 @@ import shutil
 import time
 import unicodedata
 from pathlib import Path
-from services.runtime_config import runtime_path
+from services.runtime_config import runtime_path, llm_memory_options
 
 import numpy as np
 import torch
@@ -136,6 +136,7 @@ def load_llm() -> tuple[AutoTokenizer, AutoModelForCausalLM]:
         LLM_MODEL,
         torch_dtype=DTYPE,
         device_map='auto',
+        **llm_memory_options(),
     )
     mdl.eval()
     return tok, mdl

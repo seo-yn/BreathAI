@@ -22,6 +22,27 @@ class JobStore:
                 state TEXT NOT NULL DEFAULT 'QUEUED',
                 payload TEXT, delivery TEXT NOT NULL DEFAULT 'NONE',
                 updated REAL NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS progress_callbacks (
+                job_id INTEGER NOT NULL, status TEXT NOT NULL, delivery TEXT NOT NULL,
+                updated REAL NOT NULL, PRIMARY KEY(job_id,status))""")
+
+    def claim_progress(self, analysis_id, status):
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT state FROM jobs WHERE id=?", (analysis_id,)).fetchone()
+            if not row or row[0] != 'RUNNING':
+                return False
+            if status == 'PREPROCESSING' and db.execute(
+                "SELECT 1 FROM progress_callbacks WHERE job_id=? AND status='ANALYZING'", (analysis_id,)
+            ).fetchone():
+                return False
+            return db.execute("INSERT OR IGNORE INTO progress_callbacks VALUES(?,?,'SENDING',?)",
+                              (analysis_id, status, time.time())).rowcount == 1
+
+    def finish_progress(self, analysis_id, status, delivery):
+        with self.connect() as db:
+            db.execute("UPDATE progress_callbacks SET delivery=?,updated=? WHERE job_id=? AND status=?",
+                       (delivery, time.time(), analysis_id, status))
 
     @contextmanager
     def connect(self):
@@ -78,3 +99,4 @@ class JobStore:
         # A crash after sending might mean BE committed. Do not blindly resend.
         with self.connect() as db:
             db.execute("UPDATE jobs SET delivery='UNKNOWN' WHERE delivery='SENDING'")
+            db.execute("UPDATE progress_callbacks SET delivery='UNKNOWN' WHERE delivery='SENDING'")
