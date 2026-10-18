@@ -22,6 +22,7 @@ public class FileAnalyzeResultResponse {
     private AnalyzeResultResponse.SystemStatus systemStatus;
     private AnalyzeResultResponse.PerformanceMetrics performanceMetrics;
     private List<AnalyzeResultResponse.TrendItem> trend;
+    private List<AnalyzeResultResponse.UsageStatItem> usageStats;
     private List<AnalyzeResultResponse.BurstKeyword> burstKeywords;
     private AnalyzeResultResponse.UnansweredAnalysis unanswerAnalysis;
     private AnalyzeResultResponse.ClusteringView clusteringView;

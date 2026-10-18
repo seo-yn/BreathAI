@@ -19,6 +19,7 @@ public class AnalyzeResultResponse {
     private SystemStatus systemStatus;
     private PerformanceMetrics performanceMetrics;
     private List<TrendItem> trend;
+    private List<UsageStatItem> usageStats;
     private List<BurstKeyword> burstKeywords;
     private UnansweredAnalysis unanswerAnalysis;
     private ClusteringView clusteringView;
@@ -55,6 +56,17 @@ public class AnalyzeResultResponse {
         private String date;
         private int unanswerCount;
         private int lowQualityCount;
+    }
+
+    // 업로드 파일의 날짜별 건수 (AI 콜백의 usageStats 형식), 전체·정상 건수는 예전 분석이면 null
+    @Getter
+    @Builder
+    public static class UsageStatItem {
+        private String statDate;
+        private Integer totalCnt;
+        private Integer answerCnt;
+        private int lowQualityCount;
+        private int unanswerCnt;
     }
 
     @Getter
