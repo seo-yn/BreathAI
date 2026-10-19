@@ -126,6 +126,8 @@ export default function AnalyzePage() {
     periodEndDate: "",
     isMaskingEnabled: true,
     isTranslationEnabled: false,
+    // 군집화 파라미터는 현재 화면에서 숨겨져 있다(위 주석 블록 참고).
+    // 되살릴 때 바로 쓰도록 상태는 남겨 둔다.
     minClusterSize: "",
     minSamples: "",
   });
@@ -224,11 +226,9 @@ export default function AnalyzePage() {
         periodStartDate: options.periodStartDate,
         periodEndDate: options.periodEndDate,
         isMaskingEnabled: options.isMaskingEnabled,
-        isTranslationEnabled: options.isTranslationEnabled,
-        clustering: {
-          minClusterSize: options.minClusterSize,
-          minSamples: options.minSamples,
-        },
+        // 외국어 번역은 화면에서 막아 둔 상태라 항상 false로 보낸다
+        isTranslationEnabled: false,
+        // clustering: { minClusterSize, minSamples } — 백엔드·AI 미구현으로 전송하지 않는다
       });
       setUploading(false);
       setUploadResult(res.data);
@@ -325,7 +325,8 @@ export default function AnalyzePage() {
         const res = await faqApi.apply({
           analysisId,
           clusterId: c.clusterId,
-          clusterLabel: c.clusterLabel,
+          // clusterLabel은 FaqApplyRequest 명세에 없어 보내지 않는다
+          // (백엔드 DTO에는 선택 필드로 있지만 명세 기준으로 맞춘다)
           candidateId: c.candidateId,
           qType: c.qType,
           finalQuestion: c.standardQuestion,
@@ -431,16 +432,25 @@ export default function AnalyzePage() {
                           onChange={setOption("isMaskingEnabled")} />
                         개인정보 마스킹
                       </label>
-                      <label style={S.checkLabel}>
-                        <input type="checkbox" checked={options.isTranslationEnabled}
-                          onChange={setOption("isTranslationEnabled")} />
+                      {/* 외국어 번역은 당분간 선택하지 못하게 막아 둔다.
+                          되살릴 때는 disabled와 S.checkLabelDisabled, 아래 안내 문구를 지운다. */}
+                      <label style={{ ...S.checkLabel, ...S.checkLabelDisabled }}
+                        title="외국어 번역은 현재 사용할 수 없습니다.">
+                        <input type="checkbox" disabled checked={false} readOnly
+                          style={{ cursor: "not-allowed" }} />
                         외국어 번역
+                        <span style={S.pendingTag}>준비 중</span>
                       </label>
                     </div>
                   </div>
 
+                  {/* 군집화 파라미터(최소 클러스터 크기·최소 샘플 수)는 백엔드·AI 양쪽 모두
+                      아직 받지 않아 보내도 무시된다. 구현되면 아래 블록과 options의
+                      minClusterSize/minSamples, uploadAndAnalyze의 clustering 인자를 되살린다.
+                      (2026-10-19 서연님 요청으로 임시 제거)
+
                   {/* HDBSCAN은 클러스터 개수를 직접 지정할 수 없어 min_cluster_size로 조절한다.
-                      값을 올리면 클러스터가 적고 커지며, 낮추면 많고 작아진다. */}
+                      값을 올리면 클러스터가 적고 커지며, 낮추면 많고 작아진다. *\/}
                   <div style={{ ...S.optionRow, borderBottom: "none", paddingBottom: 0 }}>
                     <label style={S.optionLabel}>
                       군집화 <span style={S.pendingTag}>백엔드 반영 대기</span>
@@ -456,6 +466,8 @@ export default function AnalyzePage() {
                     클러스터 개수는 HDBSCAN 특성상 직접 지정할 수 없어 최소 크기로 조절합니다.
                     값을 키우면 클러스터가 적고 커집니다. (현재 백엔드가 이 두 값을 받지 않아 전송되어도 무시됩니다)
                   </div>
+                  */}
+
                 </div>
 
                 {file && !uploadResult && (
@@ -731,6 +743,7 @@ const S = {
   optionLabel: { fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6 },
   optionInput: { height: 32, padding: "0 10px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: 132 },
   checkLabel:  { fontSize: 12, color: "#374151", display: "flex", alignItems: "center", gap: 5, cursor: "pointer" },
+  checkLabelDisabled: { color: "#9CA3AF", cursor: "not-allowed" },
   pendingTag:  { fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 8, background: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" },
   dropzoneDrag:{ borderColor: "#1565C0", background: "#EFF8FF" },
   dropzoneDisabled: { opacity: 0.5, cursor: "not-allowed", background: "#F9FAFB" },

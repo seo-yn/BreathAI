@@ -1,8 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import { faqApi } from "../api/faq.js";
-import { dashApi } from "../api/dashboard.js";
-import MatchedFaqBadge from "../components/MatchedFaqBadge.jsx";
-import { isAccepted } from "../utils/reviewStatus.js";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
@@ -49,9 +46,6 @@ export default function FaqPage() {
   const [query, setQuery]           = useState({ keyword: "", category: "" });
 
   // FAQ 후보 추천
-  const [candidates, setCandidates] = useState([]);
-  const [reviewing, setReviewing]   = useState(null);
-  const [latestAnalysisId, setLatestAnalysisId] = useState(null);
 
   // 변경 이력 (FAQ 단건이 아니라 전역 이력 — 서버가 faqId 필터를 받지 않는다)
   const [histories, setHistories]   = useState([]);
@@ -59,6 +53,13 @@ export default function FaqPage() {
   const [historyInfo, setHistoryInfo] = useState({ totalCount: 0, totalPages: 0 });
   const [editType, setEditType]     = useState("");
   const [historyLoaded, setHistoryLoaded] = useState(false);
+
+  // 카테고리는 백엔드가 완전 일치(q_disp_name = :name)로만 찾아 오타·부분입력이면 0건이 된다.
+  // 그래서 자유 입력 대신 실제 카테고리 목록에서 고르게 한다. 목록 전용 API가 없어
+  // 처음 펼칠 때 FAQ 전체를 한 번 받아 distinct 카테고리를 뽑는다
+  // (docs/backend-api-requests.md 에 GET /api/v1/faq/categories 를 요청해 뒀다).
+  const [categories, setCategories] = useState(null);
+  const [categoryLoading, setCategoryLoading] = useState(false);
 
   const [loading, setLoading]       = useState(true);
   const [modal, setModal]           = useState(null);
@@ -83,6 +84,26 @@ export default function FaqPage() {
     });
   }, []);
 
+  // 브라우저 기본 select는 클릭 즉시 목록을 펼치고, 그 뒤에 도착한 항목은 반영하지 않는다.
+  // 그래서 클릭 시점이 아니라 화면 진입 직후 백그라운드로 미리 받아 둔다.
+  // 첫 화면 렌더를 막지 않도록 FAQ 목록을 먼저 띄운 뒤에 호출한다.
+  const loadCategories = useCallback(async () => {
+    setCategoryLoading(true);
+    try {
+      // 전체 건수를 먼저 확인하고(size=1) 그만큼만 받는다. 상한 2000.
+      const head = await faqApi.getList({ page: 0, size: 1 });
+      const total = Math.min(Math.max(head.data?.totalCount ?? 1, 1), 2000);
+      const res = await faqApi.getList({ page: 0, size: total });
+      // 카테고리가 비어 있는 FAQ도 있어 null은 걸러낸다
+      const names = [...new Set((res.data?.faqList || []).map((f) => f.category).filter(Boolean))];
+      setCategories(names.sort((a, b) => a.localeCompare(b, "ko")));
+    } catch {
+      setCategories([]); // 실패해도 빈 목록으로 두고 검색 자체는 막지 않는다
+    } finally {
+      setCategoryLoading(false);
+    }
+  }, []);
+
   const loadHistories = useCallback(async (targetPage, type) => {
     const res = await faqApi.getHistory({ page: targetPage, size: PAGE_SIZE, editType: type });
     setHistories(res.data?.histories || []);
@@ -93,21 +114,21 @@ export default function FaqPage() {
   }, []);
 
   useEffect(() => {
-    dashApi.getAnalysisHistory(0, 1).then((histRes) => {
-      const latestId = histRes.data?.history?.[0]?.analysisId || null;
-      setLatestAnalysisId(latestId);
-
-      const requests = [loadFaqs(0, { keyword: "", category: "" })];
-      if (latestId) requests.push(faqApi.getCandidates(latestId));
-
-      Promise.all(requests).then(([, candRes]) => {
-        setCandidates(candRes?.data?.recommendations || []);
-      }).catch((err) => toast.error(err.message || "FAQ 목록을 불러오지 못했습니다."))
-        .finally(() => setLoading(false));
-    }).catch((err) => {
-      toast.error(err.message || "분석 이력을 불러오지 못했습니다.");
-      setLoading(false);
-    });
+    // FAQ 후보 검토는 "신규 데이터 분석"에서만 하므로 이 화면은 운영 FAQ만 불러온다.
+    // 비동기 콜백 안에서 상태를 바꿔야 set-state-in-effect 규칙에 걸리지 않는다.
+    let cancelled = false;
+    (async () => {
+      try {
+        await loadFaqs(0, { keyword: "", category: "" });
+        // 목록을 띄운 뒤 카테고리 선택지를 뒤따라 받는다 (실패해도 화면엔 영향 없음)
+        if (!cancelled) loadCategories();
+      } catch (err) {
+        if (!cancelled) toast.error(err.message || "FAQ 목록을 불러오지 못했습니다.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -135,56 +156,6 @@ export default function FaqPage() {
   const openHistoryTab = () => {
     setTab("history");
     if (!historyLoaded) runHistory(0, "");
-  };
-
-  const handleReview = async (candidateId, action) => {
-    const c = candidates.find((x) => x.candidateId === candidateId);
-    if (!c) return;
-
-    if (action === "ACCEPT") {
-      if (!c.standardQuestion || !c.answerDraft) {
-        toast.error("표준 질문 또는 답변 초안이 비어 있는 후보는 승인할 수 없습니다.");
-        return;
-      }
-      // 백엔드 FaqApplyRequest.keywords가 @NotEmpty라 빈 배열은 400이 된다
-      if (!c.representativeKeywords?.length) {
-        toast.error("대표 키워드가 없는 후보는 승인할 수 없습니다.");
-        return;
-      }
-      setReviewing(candidateId);
-      try {
-        const res = await faqApi.apply({
-          analysisId: latestAnalysisId,
-          clusterId: c.clusterId,
-          clusterLabel: c.clusterLabel,
-          candidateId: c.candidateId,
-          qType: c.qType,
-          finalQuestion: c.standardQuestion,
-          finalAnswer: c.answerDraft,
-          keywords: c.representativeKeywords,
-          isManualPatchConfirmed: false,
-        });
-        // 백엔드가 EXPAND 후보면 기존 FAQ를 확장하고 editType으로 알려준다
-        toast.success(res.data?.editType === "EXPAND"
-          ? "기존 FAQ를 확장했습니다."
-          : "신규 FAQ로 반영되었습니다.");
-        await runSearch(0, query);
-        if (historyLoaded) runHistory(0, editType);
-      } catch (err) {
-        toast.error(err.message || "FAQ 반영에 실패했습니다.");
-        return;
-      } finally {
-        setReviewing(null);
-      }
-    }
-
-    setCandidates((prev) =>
-      prev.map((x) =>
-        x.candidateId === candidateId
-          ? { ...x, reviewStatus: action === "ACCEPT" ? "APPLIED" : "REJECTED" }
-          : x
-      )
-    );
   };
 
   const handleUpdate = async (faq, editReason) => {
@@ -219,19 +190,17 @@ export default function FaqPage() {
     }
   };
 
-  const pendingCount = candidates.filter((c) => c.reviewStatus === "PENDING").length;
 
   if (loading) return <div style={{ padding: 40, color: "#6B7280" }}>불러오는 중...</div>;
 
   return (
     <div style={S.page}>
-      <div style={S.pageTitle}>FAQ 후보 관리</div>
-      <div style={S.pageSub}>현재 등록된 FAQ를 확인하고 AI 추천 후보를 검토합니다.</div>
+      <div style={S.pageTitle}>FAQ 관리</div>
+      <div style={S.pageSub}>현재 운영 중인 FAQ를 확인하고 수정합니다. 신규 후보 검토는 <strong>신규 데이터 분석</strong>에서 합니다.</div>
 
       <div style={S.tabs}>
         {[
           { key: "list",      label: `FAQ 리스트 (${pageInfo.totalCount})` },
-          { key: "recommend", label: `FAQ 후보 추천${pendingCount > 0 ? ` (검토 필요 ${pendingCount})` : ""}` },
           { key: "history",   label: "변경 이력" },
         ].map((t) => (
           <div key={t.key}
@@ -250,10 +219,20 @@ export default function FaqPage() {
               value={keywordInput}
               onChange={(e) => setKeywordInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() }); }} />
-            <input style={{ ...S.searchInput, width: 160 }} placeholder="카테고리명"
+            <select style={{ ...S.searchInput, width: 180, cursor: "pointer" }}
               value={categoryInput}
-              onChange={(e) => setCategoryInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() }); }} />
+              onChange={(e) => {
+                const next = e.target.value;
+                setCategoryInput(next);
+                runSearch(0, { keyword: keywordInput.trim(), category: next });
+              }}>
+              <option value="">전체 카테고리</option>
+              {categoryLoading && <option disabled>불러오는 중...</option>}
+              {categories?.map((c) => <option key={c} value={c}>{c}</option>)}
+              {categoryInput && !categories?.includes(categoryInput) && (
+                <option value={categoryInput}>{categoryInput}</option>
+              )}
+            </select>
             <button style={S.btnSearch}
               onClick={() => runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() })}>
               검색
@@ -310,114 +289,6 @@ export default function FaqPage() {
               <span style={{ fontSize: 12, color: "#6B7280" }}>{page + 1} / {pageInfo.totalPages}</span>
               <button style={S.btnSm} disabled={page >= pageInfo.totalPages - 1} onClick={() => runSearch(page + 1, query)}>다음 →</button>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* ── FAQ 후보 추천 ── */}
-      {tab === "recommend" && (
-        <div>
-          <div style={S.infoBanner}>
-            🤖 LLM API가 미답변 로그를 분석하여 신규 FAQ 후보를 추천합니다. 승인하면 FAQ DB에 자동 반영됩니다.
-            {!isAdmin && " (반영은 관리자 권한이 필요합니다)"}
-          </div>
-
-          {candidates.length === 0 ? (
-            <div style={S.empty}><div style={{ fontSize: 32, marginBottom: 8 }}>✨</div><div>추천 후보가 없습니다.</div></div>
-          ) : (
-            candidates.map((c) => (
-              <div key={c.candidateId} style={{
-                ...S.candCard,
-                borderLeft: `4px solid ${isAccepted(c.reviewStatus) ? "#43A047" : c.reviewStatus === "REJECTED" ? "#E53935" : "#1565C0"}`,
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
-                      <span style={{
-                        fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 10,
-                        background: c.candidateType === "NEW" ? "#DBEAFE" : "#EDE9FE",
-                        color: c.candidateType === "NEW" ? "#1E40AF" : "#5B21B6",
-                      }}>
-                        {c.candidateType === "NEW" ? "신규 FAQ" : "키워드 확장"}
-                      </span>
-                      {c.category && <span style={S.categoryTag}>{c.category}</span>}
-                      <span style={{ fontSize: 11, color: "#9CA3AF" }}>매칭 {c.occurrenceCount}건</span>
-                      <MatchedFaqBadge matches={c.matchedFaqs} candidateType={c.candidateType} />
-                    </div>
-                    <div style={S.faqQ}>{c.standardQuestion}</div>
-                  </div>
-
-                  {c.reviewStatus === "PENDING" ? (
-                    <div style={{ display: "flex", gap: 6, marginLeft: 12 }}>
-                      <button style={S.btnSm} onClick={() => setModal({ type: "detail", data: c })}>상세보기</button>
-                      {isAdmin && (
-                        <>
-                          <button style={S.btnAccept} disabled={reviewing === c.candidateId}
-                            onClick={() => handleReview(c.candidateId, "ACCEPT")}>
-                            {reviewing === c.candidateId ? "반영 중..." : "✓ 승인"}
-                          </button>
-                          <button style={S.btnReject} disabled={reviewing === c.candidateId}
-                            onClick={() => handleReview(c.candidateId, "REJECT")}>✗ 반려</button>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <span style={{
-                      fontSize: 12, fontWeight: 500, padding: "4px 14px", borderRadius: 20, marginLeft: 12,
-                      background: isAccepted(c.reviewStatus) ? "#D1FAE5" : "#FDECEA",
-                      color: isAccepted(c.reviewStatus) ? "#065F46" : "#B91C1C",
-                    }}>
-                      {isAccepted(c.reviewStatus) ? "✅ 승인됨" : "❌ 반려됨"}
-                    </span>
-                  )}
-                </div>
-
-                <div style={S.faqA}>{toPlainText(c.answerDraft)}</div>
-
-                {/* 기존 학습데이터와 겹치는 항목 — 중복 반영을 막기 위해 질문 원문까지 보여준다 */}
-                {c.matchedFaqs?.length > 0 && (
-                  <div style={S.matchedBox}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", marginBottom: 6 }}>
-                      유사한 기존 FAQ
-                    </div>
-                    {c.matchedFaqs.map((m, i) => (
-                      <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, padding: "3px 0" }}>
-                        <span style={{ color: "#374151", flex: 1 }}>
-                          {m.question || <em style={{ color: "#9CA3AF" }}>운영 FAQ에 없음 (seq {m.matchedFaqSeqNum})</em>}
-                        </span>
-                        <span style={{ color: "#1565C0", fontWeight: 600, whiteSpace: "nowrap" }}>
-                          {(m.matchScore * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div style={{ marginTop: 8, marginBottom: 4, fontSize: 11, color: "#6B7280" }}>대표 키워드</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
-                  {c.representativeKeywords?.map((k) => (
-                    <span key={k} style={{ ...S.tag, background: "#EEF2FF", color: "#4338CA", borderColor: "#C7D2FE" }}>{k}</span>
-                  ))}
-                </div>
-
-                <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 4 }}>유사어 / 오타</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                  {c.synonyms?.map((s, i) => (
-                    <span key={i} style={{
-                      fontSize: 11, padding: "2px 8px", borderRadius: 12,
-                      background: s.type === "TYPO" ? "#FEF3C7" : s.type === "ABBR" ? "#F0FDF4" : "#EFF8FF",
-                      color: s.type === "TYPO" ? "#92400E" : s.type === "ABBR" ? "#166534" : "#1565C0",
-                      border: `1px solid ${s.type === "TYPO" ? "#FDE68A" : s.type === "ABBR" ? "#BBF7D0" : "#BFDBFE"}`,
-                    }}>
-                      {s.text}
-                      <span style={{ fontSize: 9, marginLeft: 3, opacity: 0.6 }}>
-                        {s.type === "TYPO" ? "오타" : s.type === "ABBR" ? "약어" : "유사어"}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))
           )}
         </div>
       )}
@@ -486,65 +357,6 @@ export default function FaqPage() {
         </div>
       )}
 
-      {/* ── 상세보기 모달 ── */}
-      {modal?.type === "detail" && (
-        <div style={S.modalBg} onClick={() => setModal(null)}>
-          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
-            <div style={S.modalTitle}>FAQ 후보 상세</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14, fontSize: 13 }}>
-              <div>
-                <div style={S.modalLabel}>표준 질문</div>
-                <div style={S.modalValue}>{modal.data.standardQuestion}</div>
-              </div>
-              <div>
-                <div style={S.modalLabel}>답변 초안</div>
-                <div style={{ ...S.modalValue, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{toPlainText(modal.data.answerDraft)}</div>
-              </div>
-              {modal.data.similarQuestions?.length > 0 && (
-                <div>
-                  <div style={S.modalLabel}>유사 질문 ({modal.data.similarQuestions.length})</div>
-                  <ul style={{ margin: "6px 0 0", paddingLeft: 18, color: "#6B7280", lineHeight: 1.7 }}>
-                    {modal.data.similarQuestions.map((q, i) => <li key={i}>{q}</li>)}
-                  </ul>
-                </div>
-              )}
-              <div>
-                <div style={S.modalLabel}>유사어</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>
-                  {modal.data.synonyms?.map((s, i) => (
-                    <span key={i} style={{
-                      fontSize: 11, padding: "2px 8px", borderRadius: 12,
-                      background: s.type === "TYPO" ? "#FEF3C7" : "#EFF8FF",
-                      color: s.type === "TYPO" ? "#92400E" : "#1565C0",
-                      border: `1px solid ${s.type === "TYPO" ? "#FDE68A" : "#BFDBFE"}`,
-                    }}>
-                      {s.text}
-                      <span style={{ fontSize: 9, marginLeft: 3, opacity: 0.6 }}>
-                        {s.type === "TYPO" ? "오타" : s.type === "ABBR" ? "약어" : "유사어"}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 20 }}>
-                <div>
-                  <div style={S.modalLabel}>매칭 건수</div>
-                  <div style={{ fontWeight: 600, fontSize: 16 }}>{modal.data.occurrenceCount}건</div>
-                </div>
-              </div>
-            </div>
-            <div style={S.modalActions}>
-              <button style={S.btnSm} onClick={() => setModal(null)}>닫기</button>
-              {isAdmin && (
-                <>
-                  <button style={S.btnReject} onClick={() => { handleReview(modal.data.candidateId, "REJECT"); setModal(null); }}>✗ 반려</button>
-                  <button style={S.btnAccept} onClick={() => { handleReview(modal.data.candidateId, "ACCEPT"); setModal(null); }}>✓ 승인</button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── 수정 모달 ── */}
       {modal?.type === "edit" && (

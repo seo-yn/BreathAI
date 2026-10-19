@@ -1,6 +1,6 @@
 # 백엔드 API 추가/수정 요청서
 
-최초 작성: 2026-10-10 · 갱신: 2026-10-15 (develop `f32afdc` 기준 — 10/10 이후 변경 없음)
+최초 작성: 2026-10-10 · 갱신: 2026-10-19 (develop `c984af2` 기준)
 작성: 프론트엔드 · 대상: `ttobagi-server`, 일부는 AI 서버(FastAPI) 동반 수정 필요
 
 프론트엔드 신규 요구사항 4건에 대한 요청서입니다. **10/4~10/10 PR 8건이 머지되면서
@@ -57,15 +57,18 @@
 `state` 컬럼으로 비활성 항목을 제외할지는 서연님 판단에 맡기겠습니다
 (스키마 주석에 "상태값 (확인 필요)"로 적혀 있습니다).
 
-### `GET /api/v1/faq/training-data`
+### `GET /api/v1/faq/categories` (신규 요청)
 
-| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
-|---|---|---|---|---|
-| `page` | int | X | 0 | 0-base |
-| `size` | int | X | 20 | |
-| `keyword` | string | X | - | 질문 + 답변 부분 일치 |
+FAQ 목록의 카테고리 필터에 쓸 카테고리 마스터 목록입니다.
 
-Token: Yes · 권한: `hasAnyRole('USER','ADMIN')` (조회라서 USER도 허용 부탁드립니다)
+현재 `GET /api/v1/faq`의 `category` 파라미터는 `FaqRepository.findQTypesByCategoryName`이
+`WHERE q_disp_name = :name` 으로 **완전 일치**만 찾습니다. 운영자가 정확한 표시명을 알 수 없어
+부분 입력이나 오타면 조용히 0건이 됩니다.
+
+프론트는 임시로 FAQ 전체를 한 번 받아 `category`를 중복 제거해 드롭다운을 만들고 있는데,
+FAQ가 늘어나면 낭비가 큽니다. 아래 API가 생기면 그걸로 바꾸겠습니다.
+
+Token: Yes · 권한: `hasAnyRole('USER','ADMIN')`
 
 ```json
 {
@@ -73,32 +76,27 @@ Token: Yes · 권한: `hasAnyRole('USER','ADMIN')` (조회라서 USER도 허용 
   "message": "요청에 성공하였습니다.",
   "status": 200,
   "data": {
-    "totalCount": 2041,
-    "totalPages": 103,
-    "currentPage": 0,
-    "size": 20,
-    "trainingData": [
-      {
-        "seqNum": 1043,
-        "standardQuestion": "유실물은 어디서 찾나요?",
-        "answer": "유실물센터는 ...",
-        "qType": 3,
-        "category": "유실물",
-        "qaCnt": 812,
-        "linkedFaqId": 128
-      }
+    "categories": [
+      { "qType": 1, "name": "유실물" },
+      { "qType": 3, "name": "불편민원" }
     ]
   }
 }
 ```
 
-- `seqNum`: `counselling_info.seq_num`. 프론트에서 행 식별자로 씁니다.
-- `linkedFaqId`: 이 학습데이터를 `sourceSeqNum`으로 참조하는 `gold_faq.faq_id`. 없으면 null.
-  어떤 기존 데이터가 이미 현행화됐는지 화면에서 구분하는 데 씁니다.
-- 질문 필드명은 다른 응답과 맞춰 `standardQuestion`으로 적었습니다. 다르면 알려주세요.
+`bronze_cate_info`에서 `q_type` 기준 최신 `q_disp_name` 하나씩이면 충분합니다
+(`findCategoryNameByQType`와 같은 규칙).
 
-프론트 화면은 `src/pages/TrainingDataPage.jsx`에 있고 사이드바 "기존 학습데이터"로 들어갑니다.
-지금은 404를 받아 "준비 중"으로 보입니다.
+부분 일치 검색으로 바꾸는 방법도 있지만, 카테고리는 값이 정해져 있어 드롭다운이 더 낫다고
+판단했습니다. 다르게 생각하시면 알려주세요.
+
+---
+
+### ~~`GET /api/v1/faq/training-data`~~ (철회)
+
+2026-10-19 기준 **철회합니다.** "FAQ 리스트가 곧 기존 학습데이터"라는 정리에 따라
+기존 학습데이터 화면을 삭제했습니다. 구현하지 않으셔도 됩니다.
+
 
 ---
 
