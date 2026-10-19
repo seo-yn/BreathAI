@@ -77,7 +77,7 @@ FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 
 | 방향 | 내용 | 결정일 |
 |---|---|---|
-| BE → AI | `POST {TTOBAGI_AI_SERVER}/pipeline`, multipart. `Authorization: Bearer <TTOBAGI_AI_API_TOKEN>`. **xlsx는 BE가 첫 시트를 UTF-8 CSV로 바꿔서 보낸다**(AI는 CSV만 받음). DB에 분석 기록이 저장된 뒤에 보낸다. 연결 실패·4xx·5xx·2분 무응답이면 분석을 `FAIL`로 바꾸고 SSE로 알린다 | 2026-10-17 |
+| BE → AI | `POST {TTOBAGI_AI_SERVER}/pipeline`, multipart. `Authorization: Bearer <TTOBAGI_AI_API_TOKEN>`. **xlsx는 BE가 첫 시트를 UTF-8 CSV로 바꿔서 보낸다**(AI는 CSV만 받음). 엑셀 날짜 칸은 화면 서식과 상관없이 ISO 형식(`2026-08-27 12:04:08`, 시각이 없으면 `2026-08-27`)으로 바꾼다(2026-10-18, AI는 ISO 날짜만 받음). AI가 입력 검사에서 422로 거절하면 분석 실패 사유에 "파일 내용을 받지 않았습니다…"를 남겨 연결 실패와 구분한다(실패 사유는 DB에만 남고 API로는 아직 보내지 않음). DB에 분석 기록이 저장된 뒤에 보낸다. 연결 실패·4xx·5xx·2분 무응답이면 분석을 `FAIL`로 바꾸고 SSE로 알린다 | 2026-10-17 |
 | AI → BE | `POST /api/v1/dashboard/analyze/callback/{analysisId}`, `Authorization: Bearer <TTOBAGI_CALLBACK_TOKEN>` | 2026-10-18 |
 | 콜백 `status` | `PREPROCESSING`, `ANALYZING`(중간 상태, 상태만 바꿈), `COMPLETED`(결과 저장), `FAIL` 또는 `FAILED`(실패, `errorMessage` 저장) | 2026-10-17 |
 | 콜백 본문 | 명세의 `clusters`, `unansweredStats`, `surgeDetections`, `performance`는 실제와 다르다. 실제 필드는 `status`, `errorMessage`, `systemStatus`, `performanceMetrics`, `trend`, `burstKeywords`, `unanswerAnalysis`, `clusteringView`, `faqCandidates`, `evaluation`, `surgeDetection`, `usageStats`이고, 구조는 분석 결과 조회 응답과 거의 같다. `trend[].date`는 `MM-dd`도 받으며, BE가 분석 기간의 연도를 붙여 저장한다. 그 밖의 필드(`metricsScope`, `visualizedLogCount` 등)는 무시한다 | |

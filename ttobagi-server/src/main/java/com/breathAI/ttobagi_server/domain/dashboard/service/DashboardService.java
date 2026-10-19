@@ -466,7 +466,7 @@ public class DashboardService {
                         isTranslationEnabled,
                         periodStartDate != null ? periodStartDate : "",
                         periodEndDate != null ? periodEndDate : "",
-                        () -> markPipelineRequestFailed(analysisId));
+                        reason -> markPipelineRequestFailed(analysisId, reason));
                 if (!alreadyArchived) {
                     // 변환 전 원본을 그대로 보관한다 (xlsx는 xlsx로)
                     uploadArchiveService.archive(uploadId, fileBytes, originalFileName);
@@ -488,11 +488,11 @@ public class DashboardService {
 
     // AI 서버에 분석 요청을 보내지 못했을 때 대기 중인 분석을 실패로 바꾸고 알린다
     // 요청 스레드 밖에서 실행되므로 저장소 메서드 단위 트랜잭션으로 처리한다
-    private void markPipelineRequestFailed(Long analysisId) {
+    private void markPipelineRequestFailed(Long analysisId, String reason) {
         analysisJobRepository.findById(analysisId).ifPresent(job -> {
             // 그 사이 AI 콜백으로 진행된 분석은 건드리지 않는다
             if (job.getStatus() != AnalysisJob.Status.PENDING) return;
-            job.fail("AI 서버에 분석을 요청하지 못했습니다.");
+            job.fail(reason);
             analysisJobRepository.save(job);
             sseEmitterManager.send(analysisId, "FAIL", "분석에 실패했습니다.");
         });

@@ -9,8 +9,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.Duration;
+import java.util.function.Consumer;
 
 // AI 서버 호출 담당 유틸
 @Slf4j
@@ -36,7 +38,7 @@ public class WebClientUtil {
             Boolean isTranslationEnabled,
             String periodStartDate,
             String periodEndDate,
-            Runnable onFailure) {
+            Consumer<String> onFailure) {
         try {
             MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
             body.add("uploadId", uploadId);
@@ -65,12 +67,20 @@ public class WebClientUtil {
                                     analysisId, response.getStatusCode()),
                             e -> {
                                 log.error("AI 서버 파이프라인 요청 실패 analysisId: {}, uploadId: {}", analysisId, uploadId, e);
-                                onFailure.run();
+                                onFailure.accept(failureReason(e));
                             });
 
         } catch (Exception e) {
             log.error("AI 서버 파이프라인 요청 실패 analysisId: {}, uploadId: {}", analysisId, uploadId, e);
-            onFailure.run();
+            onFailure.accept(failureReason(e));
         }
+    }
+
+    // 분석 실패 사유, AI가 입력 파일 검사에서 거절(422)한 경우는 연결 문제와 구분한다
+    static String failureReason(Throwable e) {
+        if (e instanceof WebClientResponseException response && response.getStatusCode().value() == 422) {
+            return "AI 서버가 파일 내용을 받지 않았습니다. 번호(겹치지 않는 정수), 질문, 날짜(예: 2026-08-27 12:04:00) 열을 확인해 주세요.";
+        }
+        return "AI 서버에 분석을 요청하지 못했습니다.";
     }
 }
