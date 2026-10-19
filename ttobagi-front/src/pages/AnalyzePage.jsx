@@ -24,37 +24,83 @@ const CLUSTER_COLORS = [
 ];
 
 function ClusterScatterPlot({ points, clusterNames }) {
+  // HDBSCAN은 어느 군집에도 속하지 않는 질의를 label -1(노이즈)로 남긴다.
+  // 노이즈는 "해석할 군집"이 아니므로 색 배정에서 빼고 회색으로 눌러 둔다.
+  // 예전에는 clusterNames 순서대로 색을 돌려서 -1이 첫 번째 진한 파랑을 가져가
+  // 노이즈가 가장 눈에 띄는 군집처럼 보였다.
+  const NOISE_COLOR = "#D1D5DB";
   const colorMap = {};
-  clusterNames.forEach((c, i) => {
-    colorMap[c.clusterLabel] = CLUSTER_COLORS[i % CLUSTER_COLORS.length];
+  let colorIndex = 0;
+  clusterNames.forEach((c) => {
+    colorMap[c.clusterLabel] =
+      c.clusterLabel < 0 ? NOISE_COLOR : CLUSTER_COLORS[colorIndex++ % CLUSTER_COLORS.length];
   });
+  const colorOf = (label) => colorMap[label] ?? (label < 0 ? NOISE_COLOR : "#9CA3AF");
+
+  // 범례는 크기순으로 보여 주고 노이즈는 항상 마지막에 둔다
+  const legend = [...clusterNames].sort((a, b) => {
+    if (a.clusterLabel < 0) return 1;
+    if (b.clusterLabel < 0) return -1;
+    return (b.size || 0) - (a.size || 0);
+  });
+  const nameOf = (label) =>
+    clusterNames.find((c) => c.clusterLabel === label)?.name
+    || (label < 0 ? "노이즈" : `클러스터 ${label}`);
+
+  // 노이즈를 먼저 그려 실제 군집이 위에 오게 한다 (recharts는 배열 순서대로 렌더한다)
+  const ordered = [...points].sort((a, b) => (a.clusterLabel < 0 ? -1 : 0) - (b.clusterLabel < 0 ? -1 : 0));
 
   return (
-    <div style={{ width: "100%", height: 400 }}>
-      <ResponsiveContainer>
-        <ScatterChart>
-          <XAxis dataKey="x" type="number" name="X" tick={{ fontSize: 10 }} />
-          <YAxis dataKey="y" type="number" name="Y" tick={{ fontSize: 10 }} />
-          <Tooltip
-            cursor={{ strokeDasharray: "3 3" }}
-            content={({ payload }) => {
-              if (!payload?.length) return null;
-              const d = payload[0]?.payload;
-              return (
-                <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", fontSize: 12, maxWidth: 200 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>클러스터 {d?.clusterLabel}</div>
-                  <div style={{ color: "#6B7280", wordBreak: "break-all" }}>{d?.text?.slice(0, 50)}</div>
-                </div>
-              );
-            }}
-          />
-          <Scatter data={points} isAnimationActive={false}>
-            {points.map((p, i) => (
-              <Cell key={i} fill={colorMap[p.clusterLabel] || "#9CA3AF"} opacity={0.7} />
-            ))}
-          </Scatter>
-        </ScatterChart>
-      </ResponsiveContainer>
+    <div>
+      <div style={{ width: "100%", height: 400 }}>
+        <ResponsiveContainer>
+          <ScatterChart>
+            <XAxis dataKey="x" type="number" name="X" tick={{ fontSize: 10 }} />
+            <YAxis dataKey="y" type="number" name="Y" tick={{ fontSize: 10 }} />
+            <Tooltip
+              cursor={{ strokeDasharray: "3 3" }}
+              content={({ payload }) => {
+                if (!payload?.length) return null;
+                const d = payload[0]?.payload;
+                return (
+                  <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", fontSize: 12, maxWidth: 220 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, marginBottom: 4 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: colorOf(d?.clusterLabel) }} />
+                      {nameOf(d?.clusterLabel)}
+                    </div>
+                    <div style={{ color: "#6B7280", wordBreak: "break-all" }}>{d?.text?.slice(0, 50)}</div>
+                  </div>
+                );
+              }}
+            />
+            <Scatter data={ordered} isAnimationActive={false}>
+              {ordered.map((p, i) => (
+                <Cell
+                  key={i}
+                  fill={colorOf(p.clusterLabel)}
+                  opacity={p.clusterLabel < 0 ? 0.35 : 0.75}
+                />
+              ))}
+            </Scatter>
+          </ScatterChart>
+        </ResponsiveContainer>
+      </div>
+
+      {legend.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6" }}>
+          {legend.map((c) => (
+            <span
+              key={c.clusterId ?? c.clusterLabel}
+              title={(c.topKeywords || []).join(", ")}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: c.clusterLabel < 0 ? "#9CA3AF" : "#374151" }}
+            >
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: colorOf(c.clusterLabel), flexShrink: 0 }} />
+              {c.name || `클러스터 ${c.clusterLabel}`}
+              <span style={{ color: "#9CA3AF" }}>({(c.size || 0).toLocaleString()})</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -538,26 +584,43 @@ export default function AnalyzePage() {
               <div style={S.cardHeader}><span style={S.cardTitle}>응답 유형 비교</span></div>
               <div style={S.cardBody}>
                 {analyzeResult ? (() => {
+                  // samplingStatus는 정답/오답변/미답변 3분류다. 예전에는 오답변(lowQuality)을
+                  // 빼고 그려서 막대 합이 100%가 되지 않았다. 색도 대시보드와 맞춰 둔다.
+                  const s = analyzeResult.systemStatus?.samplingStatus;
                   const total = analyzeResult.systemStatus?.totalLogCount || 1;
-                  const correct = analyzeResult.systemStatus?.samplingStatus?.correct || 0;
-                  const unanswered = analyzeResult.systemStatus?.samplingStatus?.unanswer || 0;
-                  const answeredPct = ((correct / total) * 100).toFixed(1);
-                  const unansweredPct = ((unanswered / total) * 100).toFixed(1);
+                  const segments = [
+                    { label: "정답 (≥75%)",     count: s?.correct    || 0, color: "#1565C0" },
+                    { label: "오답변 (25~75%)", count: s?.lowQuality || 0, color: "#7C3AED" },
+                    { label: "미답변 (<25%)",   count: s?.unanswer   || 0, color: "#EF9F27" },
+                  ].map((seg) => ({ ...seg, pct: (seg.count / total) * 100 }));
+                  const answeredPct = segments[0].pct.toFixed(1);
                   return (
                     <div>
-                      <div style={{ marginBottom: 20 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
-                          <span style={{ fontWeight: 500 }}>신규 데이터</span>
-                          <span style={{ color: "#43A047", fontWeight: 600 }}>답변율 {answeredPct}%</span>
-                        </div>
-                        <div style={{ height: 24, background: "#F3F4F6", borderRadius: 6, overflow: "hidden", display: "flex" }}>
-                          <div style={{ width: `${answeredPct}%`, background: "#43A047", borderRadius: "6px 0 0 6px", transition: "width .6s" }} />
-                          <div style={{ width: `${unansweredPct}%`, background: "#EF9F27" }} />
-                        </div>
-                        <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#6B7280", marginTop: 4 }}>
-                          <span>🔵 답변 {answeredPct}%</span>
-                          <span>🟡 미답변 {unansweredPct}%</span>
-                        </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
+                        <span style={{ fontWeight: 500 }}>신규 데이터 {total.toLocaleString()}건</span>
+                        <span style={{ color: "#1565C0", fontWeight: 600 }}>정답률 {answeredPct}%</span>
+                      </div>
+                      <div style={{ height: 24, background: "#F3F4F6", borderRadius: 6, overflow: "hidden", display: "flex" }}>
+                        {segments.map((seg, i) => (
+                          <div
+                            key={seg.label}
+                            style={{
+                              width: `${seg.pct}%`,
+                              background: seg.color,
+                              transition: "width .6s",
+                              borderRadius: i === 0 ? "6px 0 0 6px" : i === segments.length - 1 ? "0 6px 6px 0" : 0,
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", fontSize: 11, color: "#6B7280", marginTop: 8 }}>
+                        {segments.map((seg) => (
+                          <span key={seg.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: 2, background: seg.color, flexShrink: 0 }} />
+                            {seg.label} {seg.pct.toFixed(1)}%
+                            <span style={{ color: "#9CA3AF" }}>({seg.count.toLocaleString()}건)</span>
+                          </span>
+                        ))}
                       </div>
                     </div>
                   );

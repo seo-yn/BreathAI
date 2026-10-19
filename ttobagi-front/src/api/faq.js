@@ -44,6 +44,16 @@ export const faqApi = {
   // GET /api/v1/faq/versions/{versionId}
   getVersionDetail: (versionId) => request("GET", `/api/v1/faq/versions/${versionId}`),
 
+  // GET /api/v1/faq/training-data?page=0&size=20&keyword=
+  // 챗봇 기존 학습데이터(질문-답변 쌍 약 2000건, bronze_counselling_info) 조회.
+  // DTO 목록에 TrainingDataListResponse만 있고 명세서 API 표엔 행 자체가 없어서,
+  // 경로/파라미터는 docs/backend-api-requests.md 에 제안한 명세를 따른다.
+  // 2000건 규모라 전체를 한 번에 받지 않고 서버 페이징 + 서버 검색을 전제로 한다.
+  // 백엔드 구현 전에는 /api/v1/faq/{faqId}에 먼저 걸려 400이 오고, TrainingDataPage가
+  // 400·404를 "준비 중"으로 처리한다.
+  getTrainingData: ({ page = 0, size = 20, keyword } = {}) =>
+    request("GET", `/api/v1/faq/training-data${toQueryString({ page, size, keyword })}`),
+
   // GET /api/v1/faq/download?versionId=
   // ApiResponse JSON이 아니라 text/csv 본문으로 내려오므로 requestFile을 쓴다.
   // versionId를 생략하면 서버가 최신 내용으로 새 버전(VersionType.DOWNLOAD)을 만들고 그걸 내려준다.
