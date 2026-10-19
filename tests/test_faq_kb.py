@@ -141,3 +141,19 @@ class FaqKbTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KbHtmlMemoryTests(unittest.TestCase):
+    def test_all_sources_remove_base64_and_html_without_mutation(self):
+        source = {"text": '<p>안내</p><img src="data:image/png;base64,' + 'A' * 10000 + '"><script>hidden()</script><p>끝</p>', "question": "&lt;b&gt;질문&lt;/b&gt;"}
+        from services.faq_kb import sanitize_kb
+        cleaned = sanitize_kb([source])
+        self.assertEqual(cleaned[0]["text"], "안내 끝")
+        self.assertEqual(cleaned[0]["question"], "질문")
+        self.assertIn("base64", source["text"])
+
+    def test_approved_faq_is_cleaned(self):
+        from services.faq_kb import _faq_to_kb_record
+        record = _faq_to_kb_record({"faq_id": 1, "question": "<b>질문</b>", "answer": '<img src="data:image/png;base64,AAAA"><p>답변</p>'})
+        self.assertEqual(record["answer"], "답변")
+        self.assertNotIn("<", record["text"])

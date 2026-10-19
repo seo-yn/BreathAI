@@ -99,8 +99,8 @@ def _faq_to_kb_record(row: dict) -> dict:
     검색 모델이 질문·답변·키워드를 함께 참고하도록 세 필드를 `text`로 합친다.
     """
     faq_id = int(row["faq_id"])
-    question = str(row.get("question") or "").strip()
-    answer = str(row.get("answer") or "").strip()
+    question = _clean_text(row.get("question"))
+    answer = _clean_text(row.get("answer"))
     keywords = _parse_keywords(row.get("keywords"))
     keyword_text = ", ".join(keywords)
 
@@ -181,6 +181,9 @@ def _clean_text(value: Any) -> str:
     except (ImportError, TypeError, ValueError):
         pass
     text = html.unescape(str(value))
+    text = re.sub(r"<(script|style)\b[^>]*>.*?</\1\s*>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<img\b[^>]*>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"data:image/[^;\s]+;base64,[A-Za-z0-9+/=]+", " ", text, flags=re.I)
     text = re.sub(r"<[^>]+>", " ", text).replace("||", " ")
     return re.sub(r"\s+", " ", text).strip()
 
@@ -364,6 +367,19 @@ def merge_kb(base_records: list[dict], approved_faqs: list[dict]) -> list[dict]:
     return retained_base + approved_faqs
 
 
+def sanitize_kb(sources: list[dict]) -> list[dict]:
+    """Clean every KB source before embedding and answer prompting."""
+    records = []
+    for source in sources:
+        record = dict(source)
+        for field in ("text", "question", "answer"):
+            if field in record:
+                record[field] = _clean_text(record[field])
+        if record.get("text"):
+            records.append(record)
+    return records
+
+
 def load_current_kb(
     base_path: Path,
     connection_factory: ConnectionFactory | None = None,
@@ -380,7 +396,7 @@ def load_current_kb(
     # A slim deployment may contain neither source file. In that case the
     # seeded active DB copies are the only available existing FAQ source.
     approved = load_approved_faqs(connection_factory, include_source_copies=not handcrafted)
-    merged = merge_kb(base + handcrafted, approved)
+    merged = sanitize_kb(merge_kb(base + handcrafted, approved))
     return merged, {
         "base": len(base),
         **source_counts,

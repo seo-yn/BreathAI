@@ -49,6 +49,8 @@ class EndpointClient:
                 values['file'] = UploadFile(file=io.BytesIO(files['file'][1]), filename=files['file'][0])
                 for field, default in [('isMaskingEnabled', True), ('isTranslationEnabled', False)]:
                     values[field] = str(values.get(field, str(default))).lower() == 'true'
+                values['minClusterSize'] = int(values.get('minClusterSize', 5))
+                values['minSamples'] = int(values.get('minSamples', 2))
                 values.setdefault('periodStartDate', '')
                 values.setdefault('periodEndDate', '')
                 result = route.endpoint(**values)
@@ -80,6 +82,22 @@ class PipelineApiTest(unittest.TestCase):
                 "isTranslationEnabled": "false", "periodStartDate": "2026-10-01", "periodEndDate": "2026-10-31"}
         data.update(overrides)
         return self.client.post("/pipeline", headers=self.auth, data=data, files={"file": ("../input.csv", CSV)})
+
+    def test_clustering_parameters_reach_worker_and_change_job_identity(self):
+        self.assertEqual(self.submit(minClusterSize="12", minSamples="4").status_code, 202)
+        seen = {}
+        def runner(*args, **options):
+            seen.update(options)
+            return 1
+        process_one(self.app.state.store, runner=runner)
+        self.assertEqual(seen["min_cluster_size"], 12)
+        self.assertEqual(seen["min_samples"], 4)
+        self.assertEqual(self.submit(minClusterSize="13", minSamples="4").status_code, 409)
+
+    def test_invalid_clustering_parameters_are_rejected(self):
+        self.assertEqual(self.submit(minClusterSize="1").status_code, 422)
+        self.assertEqual(self.submit(minSamples="0").status_code, 422)
+        self.assertIsNone(self.app.state.store.get(1))
 
     def test_auth_upload_validation_and_private_status(self):
         self.assertEqual(self.client.post("/pipeline", data={"uploadId": "x", "analysisId": "1"},

@@ -34,8 +34,10 @@ class RuntimeJobsTest(unittest.TestCase):
             ):
                 for name in ("작업1", "작업2"):
                     job = root / name
-                    self.assertEqual(run_job(source, job, templates=templates), 0)
+                    self.assertEqual(run_job(source, job, templates=templates, min_cluster_size=12, min_samples=4), 0)
                     self.assertEqual(json.loads((job / "status.json").read_text(encoding="utf-8"))["status"], "COMPLETED")
+            self.assertEqual(environments[0]["TTOBAGI_MIN_CLUSTER_SIZE"], "12")
+            self.assertEqual(environments[0]["TTOBAGI_MIN_SAMPLES"], "4")
             self.assertNotEqual(environments[0]["TTOBAGI_DATA_DIR"], environments[1]["TTOBAGI_DATA_DIR"])
             self.assertEqual(environments[0]["TTOBAGI_GENERAL_FAQ_PATH"], str(root / "shared.xlsx"))
             self.assertEqual(environments[0]["TTOBAGI_MASKING_ENABLED"], "true")
