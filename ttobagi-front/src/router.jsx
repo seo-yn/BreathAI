@@ -7,7 +7,6 @@ import DashboardPage from "./pages/DashboardPage.jsx";
 import AnalyzePage from "./pages/AnalyzePage.jsx";
 import FaqPage from "./pages/FaqPage.jsx";
 import FaqVersionsPage from "./pages/FaqVersionsPage.jsx";
-import TrainingDataPage from "./pages/TrainingDataPage.jsx";
 import AccountPage from "./pages/AccountPage.jsx";
 import AdminPromotePage from "./pages/AdminPromotePage.jsx";
 
@@ -29,7 +28,6 @@ export const router = createBrowserRouter([
       { path: "/analyze", element: <AnalyzePage /> },
       { path: "/faq", element: <FaqPage /> },
       { path: "/faq/versions", element: <FaqVersionsPage /> },
-      { path: "/training-data", element: <TrainingDataPage /> },
       { path: "/account", element: <AccountPage /> },
       { path: "/promote", element: <AdminPromotePage /> },
     ],

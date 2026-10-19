@@ -3,8 +3,8 @@ import { NavLink } from "react-router-dom";
 const NAV = [
   { to: "/dashboard", icon: "📊", label: "대시보드" },
   { to: "/analyze",   icon: "🔍", label: "신규 데이터 분석" },
-  { to: "/faq",       icon: "📋", label: "FAQ 후보 관리" },
-  { to: "/training-data", icon: "📚", label: "기존 학습데이터" },
+  // end: true가 없으면 NavLink가 접두사로 매칭해 /faq/versions 에서도 "FAQ 관리"에 불이 들어온다
+  { to: "/faq",       icon: "📋", label: "FAQ 관리", end: true },
   { to: "/faq/versions", icon: "🗂️", label: "FAQ 버전 관리" },
   { to: "/account",   icon: "👤", label: "계정 관리" },
 ];
@@ -23,7 +23,7 @@ export default function Sidebar() {
       <nav style={{ flex: 1 }}>
         <div style={S.section}>메뉴</div>
         {NAV.map((n) => (
-          <NavLink key={n.to} to={n.to}
+          <NavLink key={n.to} to={n.to} end={n.end}
             style={({ isActive }) => ({ ...S.navItem, ...(isActive ? S.navActive : {}) })}>
             <span>{n.icon}</span>
             <span>{n.label}</span>
