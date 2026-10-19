@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import unicodedata
@@ -52,8 +53,10 @@ UMAP_CLUSTER_DIM = 10
 UMAP_VIZ_DIM = 2
 UMAP_NEIGHBORS = 15
 
-HDBSCAN_MIN_CLUSTER_SIZE = 5
-HDBSCAN_MIN_SAMPLES = 2
+HDBSCAN_MIN_CLUSTER_SIZE = int(os.getenv('TTOBAGI_MIN_CLUSTER_SIZE', '5'))
+HDBSCAN_MIN_SAMPLES = int(os.getenv('TTOBAGI_MIN_SAMPLES', '2'))
+if HDBSCAN_MIN_CLUSTER_SIZE < 2 or HDBSCAN_MIN_SAMPLES < 1:
+    raise ValueError('min_cluster_size must be >= 2 and min_samples >= 1')
 
 TOP_N_KEYWORDS = 7
 RANDOM_STATE = 42

@@ -326,6 +326,13 @@ def run_full_pipeline() -> None:
         try:
             operation()
         finally:
+            # Stage locals are gone; collect cycles before releasing CUDA's cache.
+            import gc
+            import sys
+            gc.collect()
+            torch = sys.modules.get('torch')
+            if torch is not None and torch.cuda.is_available():
+                torch.cuda.empty_cache()
             # stdout preserves this even when the answer pipeline resets RUN_LOG.
             _log(f'=== STAGE {name} elapsed={time.monotonic() - started:.1f}s ===')
 

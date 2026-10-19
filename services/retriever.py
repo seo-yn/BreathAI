@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import gc
 import hashlib
 import csv
 import json
@@ -51,7 +52,10 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 TOP_K1 = 20    # dense retrieval
 TOP_K2 = 5     # after rerank
-BATCH_SIZE = 32
+MAX_SEQ_LENGTH = 512
+BATCH_SIZE = int(os.getenv('TTOBAGI_RETRIEVAL_BATCH_SIZE', '4'))
+if BATCH_SIZE < 1:
+    raise ValueError('TTOBAGI_RETRIEVAL_BATCH_SIZE must be positive')
 FAQ_MATCH_THRESHOLD = float(os.getenv('TTOBAGI_FAQ_MATCH_THRESHOLD', '0.80'))
 SIMILAR_QUESTION_LIMIT = int(os.getenv('TTOBAGI_SIMILAR_QUESTION_LIMIT', '5'))
 FAQ_SOURCE_TYPES = {'general_consultation', 'counselling_info', 'approved_faq'}
@@ -115,6 +119,7 @@ def build_or_load_index(
         and meta is not None
         and meta.get('fingerprint') == fingerprint
         and meta.get('model') == DENSE_MODEL
+        and meta.get('max_seq_length') == MAX_SEQ_LENGTH
         and meta.get('count') == len(kb)
     )
 
@@ -133,6 +138,7 @@ def build_or_load_index(
     print(f'KB 임베딩 계산 중 (n={len(kb)}, model={DENSE_MODEL})')
 
     enc = SentenceTransformer(DENSE_MODEL, device=DEVICE)
+    enc.max_seq_length = MAX_SEQ_LENGTH
     texts = [c['text'] for c in kb]
 
     emb = enc.encode(
@@ -143,12 +149,17 @@ def build_or_load_index(
         convert_to_numpy=True,
     )
 
+    del enc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     np.save(KB_EMB, emb)
     KB_EMB_META.write_text(
         json.dumps(
             {
                 'fingerprint': fingerprint,
                 'model': DENSE_MODEL,
+                'max_seq_length': MAX_SEQ_LENGTH,
                 'count': len(kb),
             },
             ensure_ascii=False,
@@ -217,6 +228,7 @@ def rerank(
 
     scores = reranker.predict(
         pairs,
+        batch_size=BATCH_SIZE,
         show_progress_bar=False,
     )
 
@@ -278,12 +290,13 @@ def run_for_faqs() -> None:
     kb_emb = build_or_load_index(kb)
 
     enc = SentenceTransformer(DENSE_MODEL, device=DEVICE)
+    enc.max_seq_length = MAX_SEQ_LENGTH
 
     reranker = CrossEncoder(
         RERANK_MODEL,
         max_length=512,
         device=DEVICE,
-        default_activation_function=torch.nn.Sigmoid(),
+        activation_fn=torch.nn.Sigmoid(),
     )
 
     print(f'reranker loaded: {RERANK_MODEL}')

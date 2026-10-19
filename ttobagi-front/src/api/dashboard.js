@@ -2,8 +2,9 @@ import { request, getStoredTokens, BASE_URL } from "./client.js";
 
 export const dashApi = {
   // GET /api/v1/dashboard/usage?year=2026&month=4
-  // 월 단위 사용량. 대시보드는 분석 결과의 usageStats(파일별 날짜 통계)로 전환해 더 이상 쓰지 않는다.
-  // 엔드포인트는 백엔드에 남아 있어 호출부만 정리했다.
+  // 월 단위 챗봇 사용량(UsageResponse: totalUsageCount, increaseRate, dailyUsage).
+  // 대시보드는 미답변·오답변 현황을 보여 주므로 단순 사용량 집계는 쓰지 않는다.
+  // 명세서에는 있는 엔드포인트라 호출부만 비워 두고 함수는 남겨 둔다.
   getUsage: (year, month) => request("GET", `/api/v1/dashboard/usage?year=${year}&month=${month}`),
 
   // POST /api/v1/dashboard/analyze/upload (업로드 + 분석 통합)
