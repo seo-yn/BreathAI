@@ -84,7 +84,10 @@ def _run_with_progress(command, *, output, on_progress, **options):
 
 
 def run_job(input_path, job_dir, *, templates=None, masking=True, translation=False,
-            period_start=None, period_end=None, on_progress=None):
+            period_start=None, period_end=None, on_progress=None,
+            min_cluster_size=5, min_samples=2):
+    if type(min_cluster_size) is not int or min_cluster_size < 2 or type(min_samples) is not int or min_samples < 1:
+        raise ValueError("min_cluster_size must be >= 2 and min_samples >= 1")
     input_path = Path(input_path).resolve(strict=True)
     templates = Path(templates or ROOT / "dataset/answer_templates.json").resolve(strict=True)
     if not input_path.is_file() or not templates.is_file():
@@ -105,6 +108,8 @@ def run_job(input_path, job_dir, *, templates=None, masking=True, translation=Fa
             "TTOBAGI_MASKING_ENABLED": str(masking).lower(),
             "TTOBAGI_TRANSLATION_ENABLED": str(translation).lower(),
             "PYTHONUNBUFFERED": "1",
+            "TTOBAGI_MIN_CLUSTER_SIZE": str(min_cluster_size),
+            "TTOBAGI_MIN_SAMPLES": str(min_samples),
         })
         # Shared FAQ sources stay outside job output; their explicit settings win.
         for key, filename in (

@@ -234,3 +234,16 @@ Bronze 원본 테이블 생성·적재 및 외래키 변경은
 분석 업로드 API는 CSV와 XLSX를 지원합니다. XLSX는 첫 번째 시트를 CSV로
 변환해 AI 서버에 전달하며 원본 파일명은 업로드 이력에 유지합니다.
 파일 구조와 오류 응답은 [분석 업로드 안내](docs/analysis-upload-formats.md)를 참고하세요.
+
+
+## AI 검색 메모리 및 군집화 설정
+
+검색 KB는 HTML 태그와 base64 이미지를 제거한 텍스트를 사용합니다.
+BGE-M3 입력 길이는 512 토큰으로 제한하며 기존 길이 설정이 없는 임베딩 캐시는 재생성합니다.
+검색 임베딩과 reranker의 배치는 기본 4이며, VRAM이 부족하면
+`TTOBAGI_RETRIEVAL_BATCH_SIZE=1`로 낮출 수 있습니다.
+
+AI `POST /pipeline` multipart 요청은 `minClusterSize`(정수 2 이상, 기본 5)와
+`minSamples`(정수 1 이상, 기본 2)를 지원합니다. 백엔드에서 이 값을 AI로 전달해야 적용됩니다.
+HDBSCAN 클러스터 개수는 직접 지정할 수 없습니다.
+자세한 변경 및 검증 범위는 [VRAM·군집화 안내](docs/vram-and-clustering-20261019.md)를 참고하세요.

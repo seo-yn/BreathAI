@@ -56,6 +56,9 @@ def process_one(store, runner=run_job, on_progress=None):
     job_dir = store.root / f"analysis-{row['id']}"
     try:
         options = {} if on_progress is None else {"on_progress": lambda status: on_progress(row['id'], status)}
+        for key, option in (("minClusterSize", "min_cluster_size"), ("minSamples", "min_samples")):
+            if key in metadata:
+                options[option] = metadata[key]
         code = runner(row["input_path"], job_dir, masking=metadata["masking"], translation=metadata["translation"],
                       period_start=metadata.get("periodStartDate"), period_end=metadata.get("periodEndDate"), **options)
         if code:

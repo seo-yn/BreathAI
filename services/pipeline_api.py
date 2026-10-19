@@ -42,7 +42,10 @@ def create_app(*, root=None, token=None, max_upload_bytes=50 * 1024 * 1024):
     @app.post("/pipeline", status_code=202, dependencies=[Depends(authorize)])
     def pipeline(file: UploadFile = File(...), uploadId: str = Form(...), analysisId: int = Form(...),
                  isMaskingEnabled: bool = Form(True), isTranslationEnabled: bool = Form(False),
-                 periodStartDate: str = Form(""), periodEndDate: str = Form("")):
+                 periodStartDate: str = Form(""), periodEndDate: str = Form(""),
+                 minClusterSize: int = Form(5, ge=2), minSamples: int = Form(2, ge=1)):
+        if minClusterSize < 2 or minSamples < 1:
+            raise HTTPException(422, "Invalid clustering parameters")
         if analysisId <= 0 or not uploadId.strip() or len(uploadId) > 200:
             raise HTTPException(422, "Invalid identifiers")
         try:
@@ -54,6 +57,7 @@ def create_app(*, root=None, token=None, max_upload_bytes=50 * 1024 * 1024):
             raise HTTPException(422, "Invalid analysis period") from None
         metadata = {"uploadId": uploadId, "analysisId": analysisId,
                     "masking": isMaskingEnabled, "translation": isTranslationEnabled,
+                    "minClusterSize": minClusterSize, "minSamples": minSamples,
                     "periodStartDate": periodStartDate, "periodEndDate": periodEndDate}
         path = uploads / f"{uuid4().hex}.csv"
         digest = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode())
