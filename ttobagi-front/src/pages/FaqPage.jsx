@@ -54,12 +54,6 @@ export default function FaqPage() {
   const [editType, setEditType]     = useState("");
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
-  // 카테고리는 백엔드가 완전 일치(q_disp_name = :name)로만 찾아 오타·부분입력이면 0건이 된다.
-  // 그래서 자유 입력 대신 실제 카테고리 목록에서 고르게 한다. 목록 전용 API가 없어
-  // 처음 펼칠 때 FAQ 전체를 한 번 받아 distinct 카테고리를 뽑는다
-  // (docs/backend-api-requests.md 에 GET /api/v1/faq/categories 를 요청해 뒀다).
-  const [categories, setCategories] = useState(null);
-  const [categoryLoading, setCategoryLoading] = useState(false);
 
   const [loading, setLoading]       = useState(true);
   const [modal, setModal]           = useState(null);
@@ -84,26 +78,6 @@ export default function FaqPage() {
     });
   }, []);
 
-  // 브라우저 기본 select는 클릭 즉시 목록을 펼치고, 그 뒤에 도착한 항목은 반영하지 않는다.
-  // 그래서 클릭 시점이 아니라 화면 진입 직후 백그라운드로 미리 받아 둔다.
-  // 첫 화면 렌더를 막지 않도록 FAQ 목록을 먼저 띄운 뒤에 호출한다.
-  const loadCategories = useCallback(async () => {
-    setCategoryLoading(true);
-    try {
-      // 전체 건수를 먼저 확인하고(size=1) 그만큼만 받는다. 상한 2000.
-      const head = await faqApi.getList({ page: 0, size: 1 });
-      const total = Math.min(Math.max(head.data?.totalCount ?? 1, 1), 2000);
-      const res = await faqApi.getList({ page: 0, size: total });
-      // 카테고리가 비어 있는 FAQ도 있어 null은 걸러낸다
-      const names = [...new Set((res.data?.faqList || []).map((f) => f.category).filter(Boolean))];
-      setCategories(names.sort((a, b) => a.localeCompare(b, "ko")));
-    } catch {
-      setCategories([]); // 실패해도 빈 목록으로 두고 검색 자체는 막지 않는다
-    } finally {
-      setCategoryLoading(false);
-    }
-  }, []);
-
   const loadHistories = useCallback(async (targetPage, type) => {
     const res = await faqApi.getHistory({ page: targetPage, size: PAGE_SIZE, editType: type });
     setHistories(res.data?.histories || []);
@@ -120,8 +94,6 @@ export default function FaqPage() {
     (async () => {
       try {
         await loadFaqs(0, { keyword: "", category: "" });
-        // 목록을 띄운 뒤 카테고리 선택지를 뒤따라 받는다 (실패해도 화면엔 영향 없음)
-        if (!cancelled) loadCategories();
       } catch (err) {
         if (!cancelled) toast.error(err.message || "FAQ 목록을 불러오지 못했습니다.");
       } finally {
@@ -219,20 +191,14 @@ export default function FaqPage() {
               value={keywordInput}
               onChange={(e) => setKeywordInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() }); }} />
-            <select style={{ ...S.searchInput, width: 180, cursor: "pointer" }}
+            {/* 명세서 GET /api/v1/faq 의 category 파라미터는 표시명 문자열을 그대로 받는다.
+                카테고리 목록을 주는 API가 명세서에 없어 선택지를 만들 수 없으므로 입력으로 둔다
+                (docs/backend-api-requests.md 에 GET /api/v1/faq/categories 를 요청해 뒀다).
+                백엔드가 q_disp_name 완전 일치로만 찾으므로 정확한 표시명을 넣어야 한다. */}
+            <input style={{ ...S.searchInput, width: 160 }} placeholder="카테고리명 (정확히)"
               value={categoryInput}
-              onChange={(e) => {
-                const next = e.target.value;
-                setCategoryInput(next);
-                runSearch(0, { keyword: keywordInput.trim(), category: next });
-              }}>
-              <option value="">전체 카테고리</option>
-              {categoryLoading && <option disabled>불러오는 중...</option>}
-              {categories?.map((c) => <option key={c} value={c}>{c}</option>)}
-              {categoryInput && !categories?.includes(categoryInput) && (
-                <option value={categoryInput}>{categoryInput}</option>
-              )}
-            </select>
+              onChange={(e) => setCategoryInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() }); }} />
             <button style={S.btnSearch}
               onClick={() => runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() })}>
               검색
