@@ -55,6 +55,10 @@ export default function FaqPage() {
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
 
+  // 카테고리 선택지. GET /api/v1/faq/categories 가 아직 없어서, 실패하면 null로 두고
+  // 명세서 GET /api/v1/faq 의 category 문자열 입력으로 떨어진다.
+  const [categories, setCategories] = useState(null);
+
   const [loading, setLoading]       = useState(true);
   const [modal, setModal]           = useState(null);
   const { user } = useAuth();
@@ -78,6 +82,18 @@ export default function FaqPage() {
     });
   }, []);
 
+  const loadCategories = useCallback(async () => {
+    try {
+      const res = await faqApi.getCategories();
+      const names = (res.data?.categories || [])
+        .map((c) => (typeof c === "string" ? c : c?.name))
+        .filter(Boolean);
+      setCategories(names.length ? names : null);
+    } catch {
+      setCategories(null); // 미구현(400/404)이든 다른 오류든 입력창으로 떨어진다
+    }
+  }, []);
+
   const loadHistories = useCallback(async (targetPage, type) => {
     const res = await faqApi.getHistory({ page: targetPage, size: PAGE_SIZE, editType: type });
     setHistories(res.data?.histories || []);
@@ -94,6 +110,8 @@ export default function FaqPage() {
     (async () => {
       try {
         await loadFaqs(0, { keyword: "", category: "" });
+        // 목록을 띄운 뒤 선택지를 뒤따라 받는다 (없으면 입력창 유지)
+        if (!cancelled) loadCategories();
       } catch (err) {
         if (!cancelled) toast.error(err.message || "FAQ 목록을 불러오지 못했습니다.");
       } finally {
@@ -191,14 +209,25 @@ export default function FaqPage() {
               value={keywordInput}
               onChange={(e) => setKeywordInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() }); }} />
-            {/* 명세서 GET /api/v1/faq 의 category 파라미터는 표시명 문자열을 그대로 받는다.
-                카테고리 목록을 주는 API가 명세서에 없어 선택지를 만들 수 없으므로 입력으로 둔다
-                (docs/backend-api-requests.md 에 GET /api/v1/faq/categories 를 요청해 뒀다).
-                백엔드가 q_disp_name 완전 일치로만 찾으므로 정확한 표시명을 넣어야 한다. */}
-            <input style={{ ...S.searchInput, width: 160 }} placeholder="카테고리명 (정확히)"
-              value={categoryInput}
-              onChange={(e) => setCategoryInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() }); }} />
+            {/* 어느 쪽이든 명세서 GET /api/v1/faq 의 category(표시명 문자열)를 그대로 보낸다.
+                선택지를 받아오면 드롭다운, 못 받아오면 입력창이다. */}
+            {categories ? (
+              <select style={{ ...S.searchInput, width: 180, cursor: "pointer" }}
+                value={categoryInput}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setCategoryInput(next);
+                  runSearch(0, { keyword: keywordInput.trim(), category: next });
+                }}>
+                <option value="">전체 카테고리</option>
+                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            ) : (
+              <input style={{ ...S.searchInput, width: 160 }} placeholder="카테고리명"
+                value={categoryInput}
+                onChange={(e) => setCategoryInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() }); }} />
+            )}
             <button style={S.btnSearch}
               onClick={() => runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() })}>
               검색

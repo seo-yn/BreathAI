@@ -44,6 +44,12 @@ export const faqApi = {
   // GET /api/v1/faq/versions/{versionId}
   getVersionDetail: (versionId) => request("GET", `/api/v1/faq/versions/${versionId}`),
 
+  // GET /api/v1/faq/categories
+  // 카테고리 필터 선택지. 아직 명세서·백엔드에 없고 docs/backend-api-requests.md 로
+  // 요청해 둔 상태라, 호출부(FaqPage)는 실패하면 문자열 입력으로 떨어지게 되어 있다.
+  // 구현되면 프론트 수정 없이 드롭다운으로 바뀐다.
+  getCategories: () => request("GET", "/api/v1/faq/categories"),
+
   // GET /api/v1/faq/download?versionId=
   // ApiResponse JSON이 아니라 text/csv 본문으로 내려오므로 requestFile을 쓴다.
   // versionId를 생략하면 서버가 최신 내용으로 새 버전(VersionType.DOWNLOAD)을 만들고 그걸 내려준다.
