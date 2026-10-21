@@ -57,20 +57,54 @@
 `state` 컬럼으로 비활성 항목을 제외할지는 서연님 판단에 맡기겠습니다
 (스키마 주석에 "상태값 (확인 필요)"로 적혀 있습니다).
 
-### `GET /api/v1/faq/categories` (신규 요청)
+### 카테고리 검색 3건 (2026-10-21 요청)
 
-FAQ 목록의 카테고리 필터에 쓸 카테고리 마스터 목록입니다.
+2026-10-21에 배포본에서 FAQ CSV를 받아 확인한 결과, `q_type`과 `bronze_cate_info`는
+정상입니다. CSV의 카테고리 열에 값이 채워져 나옵니다(기타, 홍보관련, 열차운영관련,
+승강설비 운영, 역사(편의)시설물, 승차권/운임, 역사내시설물, 부대사업, 공사경영 등).
 
-현재 `GET /api/v1/faq`의 `category` 파라미터는 `FaqRepository.findQTypesByCategoryName`이
-`WHERE q_disp_name = :name` 으로 **완전 일치**만 찾습니다. 운영자가 정확한 표시명을 알 수 없어
-부분 입력이나 오타면 조용히 0건이 됩니다.
+CSV 내보내기는 `q_type`으로 마스터에서 이름을 찾아오기 때문입니다
+(`FaqVersionItemRepository.findExportRows`의 `COALESCE(... bronze_cate_info ...)`).
 
-카테고리 목록을 주는 API가 명세서에 없어, 프론트는 **문자열 입력**으로 두었습니다
-(명세서 `GET /api/v1/faq` 의 `category` 파라미터를 그대로 전달).
+#### ① 카테고리 부분 일치 — 가장 급합니다
 
-한때 FAQ 목록 API를 전체 조회해 `category`를 중복 제거하는 방식으로 선택지를 만들었지만,
-명세서에 근거가 없는 동작이라 되돌렸습니다. 아래 API가 추가되면 그것을 근거로 드롭다운을
-만들겠습니다.
+`FaqRepository.findQTypesByCategoryName`이 완전 일치라 정확한 표시명을 모르면
+에러 없이 **조용히 0건**이 됩니다.
+
+```diff
+- @Query(value = "SELECT DISTINCT q_type FROM bronze_cate_info WHERE q_disp_name = :name", ...)
++ @Query(value = "SELECT DISTINCT q_type FROM bronze_cate_info WHERE q_disp_name LIKE CONCAT('%', :name, '%')", ...)
+```
+
+반환 타입이 이미 `List<Integer>`이고 호출부도 `f.qType IN :qTypes`라 **다른 코드는
+바꾸지 않아도 됩니다.** 같은 화면의 `keyword` 검색이 이미 `LIKE`라 동작도 통일됩니다.
+
+실제로 **명세서 예시인 `category=열차운영`을 그대로 넣으면 0건입니다.** 실제 값이
+"열차운영관련"이기 때문입니다. `역사(편의)시설물`, `승차권/운임`처럼 괄호·슬래시가
+든 이름은 정확히 입력하기 더 어렵습니다.
+
+#### ② FAQ 목록 조회의 category도 마스터에서 찾아 주세요
+
+`FaqService.getFaqList`는 `f.getCategory()`로 **저장값을 그대로** 내보냅니다.
+배포본 FAQ 1,060건에 카테고리 태그가 하나도 표시되지 않는데, `gold_faq.category`가
+비어 있기 때문으로 보입니다(①의 CSV 결과상 `q_type`은 정상).
+
+CSV 내보내기와 같은 규칙으로 `q_type`에서 이름을 찾아 주시면 화면에도 카테고리가
+표시됩니다. 기존 데이터를 건드리지 않는 방법입니다.
+
+백필을 택하신다면 아래도 가능합니다.
+
+```sql
+UPDATE gold_faq f
+SET category = (SELECT c.q_disp_name FROM bronze_cate_info c
+                WHERE c.q_type = f.q_type ORDER BY c._ingested_at DESC LIMIT 1)
+WHERE category IS NULL AND q_type IS NOT NULL;
+```
+
+#### ③ `GET /api/v1/faq/categories` 신규 — 명세서에도 등록 부탁드립니다
+
+카테고리 필터를 **드롭다운**으로 만들려면 목록이 필요합니다. 현재 명세서에 카테고리
+목록을 주는 API가 없어, 프론트는 문자열 입력으로 두고 있습니다.
 
 Token: Yes · 권한: `hasAnyRole('USER','ADMIN')`
 
@@ -81,8 +115,8 @@ Token: Yes · 권한: `hasAnyRole('USER','ADMIN')`
   "status": 200,
   "data": {
     "categories": [
-      { "qType": 1, "name": "유실물" },
-      { "qType": 3, "name": "불편민원" }
+      { "qType": 1, "name": "열차운영관련" },
+      { "qType": 3, "name": "부대사업" }
     ]
   }
 }
@@ -91,8 +125,8 @@ Token: Yes · 권한: `hasAnyRole('USER','ADMIN')`
 `bronze_cate_info`에서 `q_type` 기준 최신 `q_disp_name` 하나씩이면 충분합니다
 (`findCategoryNameByQType`와 같은 규칙).
 
-부분 일치 검색으로 바꾸는 방법도 있지만, 카테고리는 값이 정해져 있어 드롭다운이 더 낫다고
-판단했습니다. 다르게 생각하시면 알려주세요.
+**프론트는 이 경로를 이미 호출하도록 해 두었습니다.** 아직 없으므로 실패하면 기존
+문자열 입력으로 자동으로 떨어집니다. 구현되면 프론트 수정 없이 드롭다운으로 바뀝니다.
 
 ---
 
@@ -101,16 +135,6 @@ Token: Yes · 권한: `hasAnyRole('USER','ADMIN')`
 2026-10-19 기준 **철회합니다.** "FAQ 리스트가 곧 기존 학습데이터"라는 정리에 따라
 기존 학습데이터 화면을 삭제했습니다. 구현하지 않으셔도 됩니다.
 
-
----
-
-## ② 군집화 파라미터 조정 (백엔드 + AI 서버, 아직 필요)
-
-**요구사항**: "클러스터 개수 등등 조정할 수 있게"
-
-HDBSCAN은 k-means처럼 클러스터 개수를 직접 지정할 수 없습니다. `min_cluster_size`를 올리면
-클러스터가 적고 커지고, 내리면 많고 작아집니다. 그래서 화면에는 "클러스터 개수"가 아니라
-**최소 클러스터 크기 / 최소 샘플 수** 두 입력으로 만들었습니다.
 
 ### `POST /api/v1/dashboard/analyze/upload` 파라미터 추가
 
